@@ -1,5 +1,5 @@
 --[[
-    mags_autoload.script  (v0.21)
+    mags_autoload.script  (v0.23)
     Addon do GAMMA Mags Reloaded.
 
     Skanuje ekwipunek jednorazowo i po kolei uzupelnia magazynki Loadoutu.
@@ -10,7 +10,7 @@
 ]]
 
 -- znacznik: pojawi sie w logu przy ladowaniu skryptu (zawsze, niezaleznie od debug)
-printf("[mags_autoload] script file loaded (v0.21, mags_autoload_mcm)")
+printf("[mags_autoload] script file loaded (v0.23, mags_autoload_mcm)")
 
 -- Konfiguracja przez MCM: Opcje -> MCM -> Mags Autoload
 -- Jesli MCM nie jest zaladowany, uzywane sa wartosci domyslne ponizej.
@@ -26,6 +26,23 @@ local DEFAULT_SPEED = 1.0
 local DEFAULT_MARKED_MODE = 0
 local DEFAULT_LANGUAGE = 0
 local DEFAULT_SHOW_REPORT = true
+local DEFAULT_SPRINT_MODE = 0
+local get_aml_driver
+
+local function aml_driver_registered()
+	if not (
+		magazines_aml
+		and magazines_aml.get_driver
+		and magazines
+		and magazines.get_load_driver
+		and magazines.SEAM_CONTRACT
+		and magazines_aml.CONTRACT == magazines.SEAM_CONTRACT
+	) then
+		return false
+	end
+	local driver = magazines_aml.get_driver()
+	return driver ~= nil and magazines.get_load_driver() == driver
+end
 
 local function get_cfg(id, default)
 	if ui_mcm then
@@ -48,7 +65,16 @@ local function cfg_enabled(id, default)
 	return tonumber(value) == 1
 end
 
+local function setting_enabled(value, default)
+	if value == nil then return default end
+	if value == true then return true end
+	if value == false then return false end
+	local numeric = tonumber(value)
+	return numeric ~= nil and numeric ~= 0
+end
+
 function on_mcm_load()
+	local continue_field_default = aml_driver_registered()
 	return {
 		id = "mags_autoload", sh = true,
 		gr = {
@@ -62,6 +88,11 @@ function on_mcm_load()
 			}},
 			{id = "balance_key", type = "key_bind", val = 2, def = DEFAULT_BALANCE_KEY},
 			{id = "balance_mix", type = "check", val = 1, def = DEFAULT_BALANCE_MIX},
+			{id = "continue_field", type = "check", val = 1, def = continue_field_default},
+			{id = "sprint_mode", type = "list", val = 2, def = DEFAULT_SPRINT_MODE, content = {
+				{0, "sprint_cancel_queue"},
+				{1, "sprint_continue_queue"},
+			}},
 			{id = "unload_all_enabled", type = "check", val = 1, def = DEFAULT_UNLOAD_ALL_ENABLED},
 			{id = "unload_all_key", type = "key_bind", val = 2, def = DEFAULT_UNLOAD_ALL_KEY},
 			{id = "language", type = "list", val = 2, def = DEFAULT_LANGUAGE, content = {
@@ -709,7 +740,7 @@ local function get_mag_load_delay(mag)
 	return delay / speed
 end
 
-local function get_aml_driver()
+get_aml_driver = function()
 	if not (magazines_aml and magazines_aml.get_driver) then return nil end
 	if not (
 		magazines
@@ -740,6 +771,27 @@ local function get_aml_driver()
 		return nil, "fast_mode"
 	end
 	return driver
+end
+
+local function field_load_is_enabled()
+	local value = magazines_mcm and magazines_mcm.get_config and magazines_mcm.get_config("field_load_enable")
+	return setting_enabled(value, true)
+end
+
+local function should_continue_in_field(aml_driver)
+	return aml_driver ~= nil
+		and field_load_is_enabled()
+		and cfg_enabled("continue_field", get_aml_driver and get_aml_driver() ~= nil)
+end
+
+local function queue_uses_aml_field_loading(queue)
+	return queue and queue.aml_driver and field_load_is_enabled()
+end
+
+local function queue_can_continue_in_field(queue)
+	return queue_uses_aml_field_loading(queue)
+		and queue.continue_field
+		and cfg_enabled("continue_field", false)
 end
 
 local function get_aml_mcm_speed(key)
@@ -920,6 +972,7 @@ local function begin_autoload(mags, boxes, delay, refresh_boxes, skipped, aml_dr
 		mags = mags,
 		boxes = boxes,
 		aml_driver = aml_driver,
+		continue_field = should_continue_in_field(aml_driver),
 		aml_fallback_reason = fallback_reason,
 		refresh_boxes = refresh_boxes,
 		mag_index = 1,
@@ -1325,7 +1378,7 @@ local function process_balance_aml_load(queue, now)
 end
 
 local function process_balance_queue(queue)
-	if not inventory_open() then
+	if not inventory_open() and not queue_can_continue_in_field(queue) then
 		finish_autoload(true, "closed", true)
 		return
 	end
@@ -1574,6 +1627,7 @@ local function start_balance()
 		unload_index = 1,
 		expected_ammo = expected_ammo,
 		aml_driver = aml_driver,
+		continue_field = should_continue_in_field(aml_driver),
 		aml_active = false,
 		total = 0,
 		touched = 0,
@@ -1641,6 +1695,7 @@ local function start_unload_all()
 		phase = "unload",
 		mags = mags,
 		aml_driver = aml_driver,
+		continue_field = should_continue_in_field(aml_driver),
 		aml_active = false,
 		mag_index = 1,
 		total = 0,
@@ -1685,7 +1740,7 @@ local function process_autoload()
 	local queue = autoload_queue
 	if not queue then return end
 
-	if not inventory_open() then
+	if not inventory_open() and not queue_can_continue_in_field(queue) then
 		finish_autoload(true, "closed", true)
 		return
 	end
@@ -1857,10 +1912,54 @@ function on_key_press(key)
 end
 
 function on_before_key_press(key, bind, dis, flags)
+	local queue = autoload_queue
+	if queue_can_continue_in_field(queue) and not inventory_open() then
+		local bindings = key_bindings or {}
+		if bind and (
+			bind == bindings.kWPN_1
+			or bind == bindings.kWPN_2
+			or bind == bindings.kWPN_3
+			or bind == bindings.kWPN_4
+			or bind == bindings.kWPN_5
+			or bind == bindings.kWPN_6
+			or bind == bindings.kWPN_NEXT
+		) then
+			finish_autoload(true, "action", true)
+		end
+	end
 	if trigger_operation(key) then try_trigger("on_before_key_press", key) end
 end
 
+local original_field_busy_hands_tick
+local function install_field_queue_hooks()
+	if original_field_busy_hands_tick or not (mag_field_load and mag_field_load.busy_hands_tick) then
+		return
+	end
+
+	original_field_busy_hands_tick = mag_field_load.busy_hands_tick
+	mag_field_load.busy_hands_tick = function(...)
+		local queue = autoload_queue
+		if not queue_uses_aml_field_loading(queue) then
+			return original_field_busy_hands_tick(...)
+		end
+
+		if IsMoveState("mcSprint") and tonumber(get_cfg("sprint_mode", DEFAULT_SPRINT_MODE)) == 1 then
+			return
+		end
+
+		local was_active = magazines.action_in_progress and magazines.action_in_progress()
+		local result = original_field_busy_hands_tick(...)
+		if autoload_queue == queue and was_active
+			and magazines.action_in_progress and not magazines.action_in_progress()
+		then
+			finish_autoload(true, "action", true)
+		end
+		return result
+	end
+end
+
 function on_update()
+	install_field_queue_hooks()
 	process_autoload()
 
 	local mode = actor_menu and actor_menu.get_last_mode and actor_menu.get_last_mode()
@@ -1893,6 +1992,7 @@ end
 function on_game_start()
 	printf("[mags_autoload] on_game_start, callbacks registered")
 	install_spinner_cancel_hook()
+	install_field_queue_hooks()
 	RegisterScriptCallback("on_key_press", on_key_press)
 	RegisterScriptCallback("on_before_key_press", on_before_key_press)
 	RegisterScriptCallback("actor_on_update", on_update)

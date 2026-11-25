@@ -51,6 +51,24 @@
 	<string id="ui_mcm_mags_autoload_balance_mix_desc">
 		<text>Off by default: balance exact ammo groups separately and respect magazine marks. On: prefer the magazine's dominant loaded ammo; use other compatible types only when it runs out, regardless of magazine marks.</text>
 	</string>
+	<string id="ui_mcm_mags_autoload_continue_field">
+		<text>Continue the queue after closing inventory (AML)</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_continue_field_desc">
+		<text>When a compatible Animated Magazine Loading driver is active and Mags Reloaded Field Loading is enabled, let autoload, unload and balancing continue after closing inventory. Enabled by default only when AML is detected.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_sprint_mode">
+		<text>Queue behavior while sprinting</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_sprint_mode_desc">
+		<text>Choose whether sprinting cancels the entire active queue. Weapon draw and other hand actions still cancel it.</text>
+	</string>
+	<string id="ui_mcm_lst_sprint_cancel_queue">
+		<text>Cancel queue while sprinting</text>
+	</string>
+	<string id="ui_mcm_lst_sprint_continue_queue">
+		<text>Continue queue while sprinting</text>
+	</string>
 	<string id="ui_mcm_mags_autoload_unload_all_enabled">
 		<text>Enable unload magazines outside Loadout action</text>
 	</string>

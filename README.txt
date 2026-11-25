@@ -1,4 +1,4 @@
-Mags Autoload Patch v0.21 - AML plug-and-play (GAMMA Mags Reloaded 1.05)
+Mags Autoload Patch v0.23 - AML plug-and-play (GAMMA Mags Reloaded 1.05)
 
 Klawisz (domyslnie B, zmiana w MCM) skanuje ekwipunek i laduje tylko niepelne magazynki
 oznaczone jako Loadout w Mags Reloaded. Oznaczone FMJ/AP/HP magazynki uzywaja klasyfikatora
@@ -8,8 +8,13 @@ zaladowana inna amunicja: pominac magazynek, wymieszac klasy lub zwrocic stare n
 ekwipunku i zastapic je oznaczona klasa.
 
 Naboje sa ladowane pojedynczo; interfejs odswieza sie po kazdym naboju.
-Drugie nacisniecie klawisza, klikniecie X na spinnerze lub zamkniecie ekwipunku przerywa ladowanie.
-Przy przerwaniu spinner jest czyszczony.
+Drugie nacisniecie klawisza lub klikniecie X na spinnerze przerywa kolejke.
+Zamkniecie ekwipunku przerywa ja, chyba ze aktywne AML i opcja kontynuacji w MCM pozwalaja
+na prace w terenie. Przy przerwaniu spinner jest czyszczony.
+Przy aktywnym AML kolejka moze kontynuowac ladowanie, rozladowanie i balansowanie po zamknieciu
+ekwipunku (opcja w MCM, domyslnie wlaczona po wykryciu AML i przy wlaczonym Field Loading).
+Wyciagniecie broni, uzycie przedmiotu lub inna akcja zajmujaca rece przerywa cala kolejke.
+MCM pozwala wybrac, czy sprint przerywa kolejke; domyslnie sprint ja przerywa.
 Gdy AML i jego mostek sa aktywne, ladowanie (oraz rozladowanie przy trybie Replace) uzywa
 animacji i dzwiekow AML. Bez aktywnego sterownika AML mod automatycznie wraca do standardowego
 autoloadingu Mags Reloaded.

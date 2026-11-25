@@ -51,6 +51,24 @@
 	<string id="ui_mcm_mags_autoload_balance_mix_desc">
 		<text>Domy&#347;lnie wy&#322;&#261;czone: wyr&#243;wnuj osobno dok&#322;adne typy amunicji i respektuj oznaczenia magazynk&#243;w. Po w&#322;&#261;czeniu najpierw u&#380;ywaj dominuj&#261;cego typu amunicji w magazynku, a inne zgodne typy dopiero po jego wyczerpaniu; oznaczenia s&#261; ignorowane.</text>
 	</string>
+	<string id="ui_mcm_mags_autoload_continue_field">
+		<text>Kontynuuj kolejk&#281; po zamkni&#281;ciu ekwipunku (AML)</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_continue_field_desc">
+		<text>Gdy aktywny jest zgodny sterownik Animated Magazine Loading, a Field Loading Mags Reloaded jest w&#322;&#261;czone, autoload, roz&#322;adowanie i balansowanie trwaj&#261; po zamkni&#281;ciu ekwipunku. Domy&#347;lnie w&#322;&#261;czone tylko po wykryciu AML.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_sprint_mode">
+		<text>Zachowanie kolejki podczas sprintu</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_sprint_mode_desc">
+		<text>Wybierz, czy sprint przerywa ca&#322;&#261; aktywn&#261; kolejk&#281;. Wyci&#261;gni&#281;cie broni i inne akcje zajmuj&#261;ce r&#281;ce nadal j&#261; przerywaj&#261;.</text>
+	</string>
+	<string id="ui_mcm_lst_sprint_cancel_queue">
+		<text>Przerwij kolejk&#281; podczas sprintu</text>
+	</string>
+	<string id="ui_mcm_lst_sprint_continue_queue">
+		<text>Kontynuuj kolejk&#281; podczas sprintu</text>
+	</string>
 	<string id="ui_mcm_mags_autoload_unload_all_enabled">
 		<text>W&#322;&#261;cz roz&#322;adowywanie magazynk&#243;w spoza Loadoutu</text>
 	</string>

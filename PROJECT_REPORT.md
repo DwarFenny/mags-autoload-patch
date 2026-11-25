@@ -9,8 +9,8 @@ amunicji. Opcjonalnie współpracuje z Animated Magazine Loading (AML), aby
 
 ## Aktualny stan
 
-- Aktualna wersja: **v0.21**.
-- Najnowsza paczka: `Mags_Autoload_Patch - by Fennu - AML v0.21.zip`.
+- Aktualna wersja: **v0.23**.
+- Najnowsza paczka: `Mags_Autoload_Patch - by Fennu - AML v0.23.zip`.
 - Użytkownik przetestował ostatnie zmiany i zgłosił, że działanie wydaje się
   prawidłowe.
 - Walidacja techniczna obejmowała składnię Lua, XML MCM i zawartość ZIP.
@@ -35,6 +35,9 @@ amunicji. Opcjonalnie współpracuje z Animated Magazine Loading (AML), aby
   i opcję debugowania.
 - Ładowanie można anulować ponownym naciśnięciem klawisza, kliknięciem X na
   spinnerze albo zamknięciem ekwipunku.
+- Przy aktywnym AML kolejki mogą kontynuować działanie po zamknięciu ekwipunku.
+  Sprint ma osobną opcję MCM; wyjęcie broni i inne akcje zajmujące ręce nadal
+  przerywają całą kolejkę.
 
 ## Zależności i instalacja
 
