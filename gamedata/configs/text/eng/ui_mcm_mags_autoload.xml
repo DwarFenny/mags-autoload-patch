@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<string_table>
+	<string id="ui_mcm_menu_mags_autoload">
+		<text>Mags Autoload</text>
+	</string>
+	<string id="ui_mcm_mags_autoload">
+		<text>Mags Autoload</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_title">
+		<text>Mags Autoload</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_key">
+		<text>Autoload key (in inventory)</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_key_desc">
+		<text>Press this key with the inventory open to top up incomplete Mags Reloaded Loadout magazines. Marked magazines use Mags Reloaded's FMJ/AP/HP/buck/slug classifier; empty marked magazines can be filled too.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_speed">
+		<text>Autoload speed multiplier</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_speed_desc">
+		<text>Range: 0.25-5.00. Without AML, 1.00 uses Mags Reloaded's load delay. With AML (Animated Magazine Loading), animation speed is capped at 2.0. Adjust its base speed in Mags Reloaded MCM > AML Load Animation Speed; values above 2.00 here cannot exceed AML's cap.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_enabled">
+		<text>Enable magazine ammo balancing</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_enabled_desc">
+		<text>Scans current Loadout magazines and loose ammo. Unmarked magazines are grouped by loaded ammo type, and single-magazine groups can still be filled from matching boxes. Uses box ammo first; unloads only the minimum surplus rounds needed when boxes alone cannot balance the magazines. Off by default.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_key_mode">
+		<text>Balancing hotkey</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_key_mode_desc">
+		<text>Choose whether balancing uses the regular Autoload key or its own key.</text>
+	</string>
+	<string id="ui_mcm_lst_balance_same_key">
+		<text>Use Autoload key</text>
+	</string>
+	<string id="ui_mcm_lst_balance_separate_key">
+		<text>Use separate key</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_key">
+		<text>Magazine balancing key</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_key_desc">
+		<text>Used only when the separate balancing key is selected. Default: N.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_mix">
+		<text>Mix compatible ammo types while balancing</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_mix_desc">
+		<text>Off by default: balance exact ammo groups separately and respect magazine marks. On: prefer the magazine's dominant loaded ammo; use other compatible types only when it runs out, regardless of magazine marks.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_unload_all_enabled">
+		<text>Enable unload magazines outside Loadout action</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_unload_all_enabled_desc">
+		<text>Press the configured key (default C) to unload loaded magazines not marked as Loadout in Mags Reloaded. Loadout magazines are never touched. Off by default.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_unload_all_key">
+		<text>Unload outside-Loadout magazines key</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_unload_all_key_desc">
+		<text>Default: C. Only active when the unload-all option is enabled.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_language">
+		<text>On-screen message language</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_language_desc">
+		<text>Choose English or Polish for Mags Autoload notifications and reports.</text>
+	</string>
+	<string id="ui_mcm_lst_english">
+		<text>English</text>
+	</string>
+	<string id="ui_mcm_lst_polish">
+		<text>Polish</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_marked_mode">
+		<text>Marked magazine ammo conflict</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_marked_mode_desc">
+		<text>Applies only to marked magazines. Skip leaves mags with a different ammo class untouched. Mix adds the marked class alongside existing rounds. Replace returns current rounds to inventory, then loads the marked class.</text>
+	</string>
+	<string id="ui_mcm_lst_skip_conflict">
+		<text>Skip conflicting magazines</text>
+	</string>
+	<string id="ui_mcm_lst_mix_marked_ammo">
+		<text>Mix with existing rounds</text>
+	</string>
+	<string id="ui_mcm_lst_replace_marked_ammo">
+		<text>Replace existing rounds</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_show_report">
+		<text>Show completion report on screen</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_show_report_desc">
+		<text>Show or hide the final summary after autoload finishes or is cancelled. Start and error messages remain visible.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_debug">
+		<text>Debug log</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_debug_desc">
+		<text>Log every key pressed in the inventory and autoload results to the game log. Off by default.</text>
+	</string>
+</string_table>

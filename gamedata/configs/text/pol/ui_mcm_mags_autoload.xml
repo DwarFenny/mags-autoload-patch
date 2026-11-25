@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="windows-1250"?>
+<string_table>
+	<string id="ui_mcm_menu_mags_autoload">
+		<text>Mags Autoload</text>
+	</string>
+	<string id="ui_mcm_mags_autoload">
+		<text>Mags Autoload</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_title">
+		<text>Mags Autoload</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_key">
+		<text>Klawisz auto&#322;adowania (w ekwipunku)</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_key_desc">
+		<text>Naci&#347;nij ten klawisz w otwartym ekwipunku, aby uzupe&#322;ni&#263; niepe&#322;ne magazynki Loadoutu Mags Reloaded. Oznaczone magazynki korzystaj&#261; z klasyfikatora FMJ/AP/HP/buck/slug; mo&#380;na te&#380; &#322;adowa&#263; puste oznaczone magazynki.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_speed">
+		<text>Mno&#380;nik pr&#281;dko&#347;ci auto&#322;adowania</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_speed_desc">
+		<text>Zakres: 0.25-5.00. Bez AML warto&#347;&#263; 1.00 u&#380;ywa op&#243;&#378;nienia Mags Reloaded. Przy w&#322;&#261;czonym AML (Animated Magazine Loading) pr&#281;dko&#347;&#263; animacji jest ograniczona do 2.0. Ustaw pr&#281;dko&#347;&#263; bazow&#261; w MCM Mags Reloaded &gt; AML Load Animation Speed; warto&#347;ci powy&#380;ej 2.00 w tym suwaku nie przekrocz&#261; limitu AML.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_enabled">
+		<text>W&#322;&#261;cz r&#243;wnowa&#380;enie amunicji</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_enabled_desc">
+		<text>Skanuje aktualne magazynki Loadoutu i lu&#378;n&#261; amunicj&#281;. Magazynki bez oznaczenia grupuje wed&#322;ug za&#322;adowanego typu amunicji; mo&#380;e te&#380; do&#322;adowa&#263; pojedynczy magazynek z pasuj&#261;cych pude&#322;ek. Najpierw u&#380;ywa naboj&#243;w z pude&#322;ek; wy&#322;adowuje tylko minimaln&#261; nadwy&#380;k&#281; z magazynk&#243;w, gdy same pude&#322;ka nie wystarcz&#261; do wyr&#243;wnania. Domy&#347;lnie wy&#322;&#261;czone.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_key_mode">
+		<text>Klawisz r&#243;wnowa&#380;enia</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_key_mode_desc">
+		<text>Wybierz zwyk&#322;y klawisz auto&#322;adowania albo osobny klawisz.</text>
+	</string>
+	<string id="ui_mcm_lst_balance_same_key">
+		<text>U&#380;yj klawisza auto&#322;adowania</text>
+	</string>
+	<string id="ui_mcm_lst_balance_separate_key">
+		<text>U&#380;yj osobnego klawisza</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_key">
+		<text>Klawisz r&#243;wnowa&#380;enia magazynk&#243;w</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_key_desc">
+		<text>Dzia&#322;a tylko po wybraniu osobnego klawisza. Domy&#347;lnie: N.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_mix">
+		<text>Mieszaj zgodn&#261; amunicj&#281; podczas r&#243;wnowa&#380;enia</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_balance_mix_desc">
+		<text>Domy&#347;lnie wy&#322;&#261;czone: wyr&#243;wnuj osobno dok&#322;adne typy amunicji i respektuj oznaczenia magazynk&#243;w. Po w&#322;&#261;czeniu najpierw u&#380;ywaj dominuj&#261;cego typu amunicji w magazynku, a inne zgodne typy dopiero po jego wyczerpaniu; oznaczenia s&#261; ignorowane.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_unload_all_enabled">
+		<text>W&#322;&#261;cz roz&#322;adowywanie magazynk&#243;w spoza Loadoutu</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_unload_all_enabled_desc">
+		<text>Naci&#347;nij ustawiony klawisz (domy&#347;lnie C), aby roz&#322;adowa&#263; za&#322;adowane magazynki nieoznaczone jako Loadout w Mags Reloaded. Magazynki Loadoutu pozostaj&#261; nietkni&#281;te. Domy&#347;lnie wy&#322;&#261;czone.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_unload_all_key">
+		<text>Klawisz roz&#322;adowania magazynk&#243;w spoza Loadoutu</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_unload_all_key_desc">
+		<text>Domy&#347;lnie: C. Dzia&#322;a tylko po w&#322;&#261;czeniu opcji roz&#322;adowywania.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_language">
+		<text>J&#281;zyk komunikat&#243;w na ekranie</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_language_desc">
+		<text>Wybierz j&#281;zyk komunikat&#243;w i raport&#243;w Mags Autoload.</text>
+	</string>
+	<string id="ui_mcm_lst_english">
+		<text>English</text>
+	</string>
+	<string id="ui_mcm_lst_polish">
+		<text>Polski</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_marked_mode">
+		<text>Konflikt amunicji w oznaczonym magazynku</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_marked_mode_desc">
+		<text>Dotyczy tylko oznaczonych magazynk&#243;w. Pomi&#324; pozostawia magazynek z inn&#261; klas&#261; amunicji bez zmian. Mieszaj dodaje oznaczon&#261; klas&#281; obok obecnych naboj&#243;w. Zast&#261;p zwraca obecne naboje do ekwipunku i &#322;aduje oznaczon&#261; klas&#281;.</text>
+	</string>
+	<string id="ui_mcm_lst_skip_conflict">
+		<text>Pomi&#324; magazynki z konfliktem</text>
+	</string>
+	<string id="ui_mcm_lst_mix_marked_ammo">
+		<text>Mieszaj z obecn&#261; amunicj&#261;</text>
+	</string>
+	<string id="ui_mcm_lst_replace_marked_ammo">
+		<text>Zast&#261;p obecn&#261; amunicj&#281;</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_show_report">
+		<text>Poka&#380; raport zako&#324;czenia na ekranie</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_show_report_desc">
+		<text>Poka&#380; lub ukryj podsumowanie po zako&#324;czeniu albo przerwaniu &#322;adowania. Komunikaty o rozpocz&#281;ciu i b&#322;&#281;dach pozostaj&#261; widoczne.</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_debug">
+		<text>Log debugowania</text>
+	</string>
+	<string id="ui_mcm_mags_autoload_debug_desc">
+		<text>Zapisuj w logu gry ka&#380;dy klawisz naci&#347;ni&#281;ty w ekwipunku i wyniki auto&#322;adowania. Domy&#347;lnie wy&#322;&#261;czone.</text>
+	</string>
+</string_table>

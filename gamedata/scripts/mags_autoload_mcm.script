@@ -1,0 +1,1899 @@
+--[[
+    mags_autoload.script  (v0.21)
+    Addon do GAMMA Mags Reloaded.
+
+    Skanuje ekwipunek jednorazowo i po kolei uzupelnia magazynki Loadoutu.
+    Oznaczone magazynki korzystaja z klasy amunicji zapisanej w ich znaczniku.
+
+    Instalacja: gamedata/scripts/mags_autoload.script w nowym modzie (MO2),
+    ladowany po GAMMA.MAGS.RELOADED.
+]]
+
+-- znacznik: pojawi sie w logu przy ladowaniu skryptu (zawsze, niezaleznie od debug)
+printf("[mags_autoload] script file loaded (v0.21, mags_autoload_mcm)")
+
+-- Konfiguracja przez MCM: Opcje -> MCM -> Mags Autoload
+-- Jesli MCM nie jest zaladowany, uzywane sa wartosci domyslne ponizej.
+local DEFAULT_KEY = DIK_keys.DIK_B
+local DEFAULT_BALANCE_ENABLED = false
+local DEFAULT_BALANCE_KEY_MODE = 0
+local DEFAULT_BALANCE_KEY = DIK_keys.DIK_N
+local DEFAULT_BALANCE_MIX = false
+local DEFAULT_UNLOAD_ALL_ENABLED = false
+local DEFAULT_UNLOAD_ALL_KEY = DIK_keys.DIK_C
+local DEFAULT_DEBUG = false
+local DEFAULT_SPEED = 1.0
+local DEFAULT_MARKED_MODE = 0
+local DEFAULT_LANGUAGE = 0
+local DEFAULT_SHOW_REPORT = true
+
+local function get_cfg(id, default)
+	if ui_mcm then
+		local v = ui_mcm.get("mags_autoload/" .. id)
+		if v ~= nil then return v end
+	end
+	return default
+end
+
+local function dbg(fmt, ...)
+	if get_cfg("debug", DEFAULT_DEBUG) then
+		printf("[mags_autoload] " .. fmt, ...)
+	end
+end
+
+local function cfg_enabled(id, default)
+	local value = get_cfg(id, default)
+	if value == true then return true end
+	if value == false or value == nil then return false end
+	return tonumber(value) == 1
+end
+
+function on_mcm_load()
+	return {
+		id = "mags_autoload", sh = true,
+		gr = {
+			{id = "title", type = "slide", link = "ui_options_slider_player", text = "ui_mcm_mags_autoload_title", size = {512, 50}, spacing = 20},
+			{id = "key", type = "key_bind", val = 2, def = DEFAULT_KEY},
+			{id = "speed", type = "track", val = 2, min = 0.25, max = 5.0, step = 0.05, def = DEFAULT_SPEED},
+			{id = "balance_enabled", type = "check", val = 1, def = DEFAULT_BALANCE_ENABLED},
+			{id = "balance_key_mode", type = "list", val = 2, def = DEFAULT_BALANCE_KEY_MODE, content = {
+				{0, "balance_same_key"},
+				{1, "balance_separate_key"},
+			}},
+			{id = "balance_key", type = "key_bind", val = 2, def = DEFAULT_BALANCE_KEY},
+			{id = "balance_mix", type = "check", val = 1, def = DEFAULT_BALANCE_MIX},
+			{id = "unload_all_enabled", type = "check", val = 1, def = DEFAULT_UNLOAD_ALL_ENABLED},
+			{id = "unload_all_key", type = "key_bind", val = 2, def = DEFAULT_UNLOAD_ALL_KEY},
+			{id = "language", type = "list", val = 2, def = DEFAULT_LANGUAGE, content = {
+				{0, "english"},
+				{1, "polish"},
+			}},
+			{id = "marked_mode", type = "list", val = 2, def = DEFAULT_MARKED_MODE, content = {
+				{0, "skip_conflict"},
+				{1, "mix_marked_ammo"},
+				{2, "replace_marked_ammo"},
+			}},
+			{id = "show_report", type = "check", val = 1, def = DEFAULT_SHOW_REPORT},
+			{id = "debug", type = "check", val = 1, def = DEFAULT_DEBUG},
+		}
+	}
+end
+
+local function inventory_open()
+	return actor_menu and actor_menu.get_last_mode and actor_menu.get_last_mode() ~= 0
+end
+
+-- typ naboju do doladowania: dominujacy w magazynku, w razie czego ostatni
+local function pick_ammo_section(loaded)
+	if not loaded or #loaded == 0 then return nil end
+	return magazines.get_dominant_round(loaded) or stack.peek(loaded)
+end
+
+-- Jeden przebieg inventory zbiera loadoutowe magazynki i dostepne pudelka z amunicja.
+local function scan_loadout()
+	local candidates, boxes = {}, {}
+	local loadout_count, incomplete_count, empty_count, marked_count = 0, 0, 0, 0
+
+	db.actor:iterate_inventory(function(owner, item)
+		if magazine_binder.is_magazine(item) then
+			local id = item:id()
+			if magazine_binder.is_carried_mag(id) then
+				loadout_count = loadout_count + 1
+				local mag_data = magazine_binder.get_data(id)
+				if mag_data and mag_data.loaded then
+					local sec = mag_data.section or item:section()
+					local capacity = SYS_GetParam(2, sec, "max_mag_size") or 0
+					if #mag_data.loaded < capacity then
+						local mark = mag_marks and mag_marks.get_mark and mag_marks.get_mark(id)
+						if mark then marked_count = marked_count + 1 end
+						if #mag_data.loaded == 0 then
+							empty_count = empty_count + 1
+						else
+							incomplete_count = incomplete_count + 1
+						end
+
+						local ammo_sec = not mark and pick_ammo_section(mag_data.loaded) or nil
+						if mark or ammo_sec then
+							candidates[#candidates + 1] = {
+								mag = item,
+								mark = mark,
+								ammo_section = ammo_sec,
+							}
+						end
+					end
+				end
+			end
+		elseif IsAmmo(item) then
+			local sec = item:section()
+			boxes[sec] = boxes[sec] or {}
+			boxes[sec][#boxes[sec] + 1] = item
+		end
+	end)
+
+	local ammo_totals = {}
+	for sec, list in pairs(boxes) do
+		for i = 1, #list do
+			ammo_totals[sec] = (ammo_totals[sec] or 0) + (list[i]:ammo_get_count() or 0)
+		end
+	end
+
+	local mags = {}
+	for i = 1, #candidates do
+		local candidate = candidates[i]
+		local ammo_sec = candidate.ammo_section
+		if candidate.mark then
+			local compatible = magazine_binder.get_magazine_caliber(candidate.mag)
+			local best_count, best_section = 0, nil
+			if compatible and priler_ammo_classifier and priler_ammo_classifier.in_group then
+				for j = 1, #compatible do
+					local sec = compatible[j]
+					local count = ammo_totals[sec] or 0
+					if count > best_count and priler_ammo_classifier.in_group(sec, candidate.mark) then
+						best_count, best_section = count, sec
+					end
+				end
+			end
+			ammo_sec = best_section
+		end
+		if ammo_sec and (ammo_totals[ammo_sec] or 0) > 0 then
+			candidate.ammo_section = ammo_sec
+			mags[#mags + 1] = candidate
+			dbg("autoload plan mag=%s mark=%s ammo=%s loose=%s", candidate.mag:id(), tostring(candidate.mark), ammo_sec, tostring(ammo_totals[ammo_sec] or 0))
+		end
+	end
+
+	return mags, boxes, loadout_count, incomplete_count, empty_count, marked_count
+end
+
+local function collect_ammo_boxes()
+	local boxes = {}
+	db.actor:iterate_inventory(function(owner, item)
+		if IsAmmo(item) then
+			local sec = item:section()
+			boxes[sec] = boxes[sec] or {}
+			boxes[sec][#boxes[sec] + 1] = item
+		end
+	end)
+	return boxes
+end
+
+local function sorted_compatible_sections(mag)
+	local compatible = magazine_binder.get_magazine_caliber(mag) or {}
+	local sections = {}
+	for i = 1, #compatible do
+		sections[#sections + 1] = compatible[i]
+	end
+	table.sort(sections)
+	return sections
+end
+
+local function section_count(rounds, section)
+	local count = 0
+	for i = 1, #(rounds or {}) do
+		if rounds[i] == section then count = count + 1 end
+	end
+	return count
+end
+
+local function section_allowed(sections, section)
+	for i = 1, #sections do
+		if sections[i] == section then return true end
+	end
+	return false
+end
+
+local function section_matches_mark(section, mark)
+	return not mark or (
+		priler_ammo_classifier
+		and priler_ammo_classifier.in_group
+		and priler_ammo_classifier.in_group(section, mark)
+	)
+end
+
+local function scan_balance_inventory()
+	local candidates, boxes, loaded_totals = {}, {}, {}
+	db.actor:iterate_inventory(function(owner, item)
+		if magazine_binder.is_magazine(item) then
+			local id = item:id()
+			if magazine_binder.is_carried_mag(id) then
+				local mag_data = magazine_binder.get_data(id)
+				if mag_data and mag_data.loaded then
+					local section = mag_data.section or item:section()
+					local capacity = SYS_GetParam(2, section, "max_mag_size") or 0
+					local compatible = sorted_compatible_sections(item)
+					if capacity > 0 and #compatible > 0 then
+						local rounds = {}
+						for i = 1, #mag_data.loaded do
+							local ammo_section = mag_data.loaded[i]
+							rounds[#rounds + 1] = ammo_section
+							loaded_totals[ammo_section] = (loaded_totals[ammo_section] or 0) + 1
+						end
+						candidates[#candidates + 1] = {
+							mag = item,
+							mark = mag_marks and mag_marks.get_mark and mag_marks.get_mark(id),
+							compatible = compatible,
+							section = section,
+							capacity = capacity,
+							rounds = rounds,
+							preferred_ammo = pick_ammo_section(rounds),
+						}
+					end
+				end
+			end
+		elseif IsAmmo(item) then
+			local section = item:section()
+			boxes[section] = boxes[section] or {}
+			boxes[section][#boxes[section] + 1] = item
+		end
+	end)
+
+	local stock = {}
+	for section, list in pairs(boxes) do
+		for i = 1, #list do
+			stock[section] = (stock[section] or 0) + (list[i]:ammo_get_count() or 0)
+		end
+	end
+	for section, count in pairs(loaded_totals) do
+		stock[section] = (stock[section] or 0) + count
+	end
+	return candidates, boxes, stock
+end
+
+local function add_balance_group(groups, by_key, key, section)
+	local group = by_key[key]
+	if not group then
+		group = {
+			key = key,
+			mags = {},
+			sections = {},
+			section_set = {},
+		}
+		by_key[key] = group
+		groups[#groups + 1] = group
+	end
+	if section and not group.section_set[section] then
+		group.section_set[section] = true
+		group.sections[#group.sections + 1] = section
+	end
+	return group
+end
+
+local function choose_marked_section(target, sections, stock, rounds)
+	local best_section, best_count = nil, -1
+	for i = 1, #sections do
+		local section = sections[i]
+		if section_matches_mark(section, target.mark) then
+			local count = rounds and section_count(rounds, section) or 0
+			if count == 0 then count = stock[section] or 0 end
+			if count > best_count then
+				best_section, best_count = section, count
+			end
+		end
+	end
+	if best_count <= 0 then return nil end
+	return best_section
+end
+
+local function build_balance_groups(candidates, stock, mix_ammo)
+	local groups, by_key = {}, {}
+
+	if not mix_ammo then
+		for i = 1, #candidates do
+			local target = candidates[i]
+			local section
+			if target.mark then
+				section = choose_marked_section(target, target.compatible, stock, target.rounds)
+			elseif #target.rounds > 0 then
+				section = pick_ammo_section(target.rounds)
+			end
+			if section and section_allowed(target.compatible, section) then
+				target.balance_section = section
+				local group = add_balance_group(groups, by_key, section, section)
+				group.mags[#group.mags + 1] = target
+			end
+		end
+
+		for i = 1, #candidates do
+			local target = candidates[i]
+			if #target.rounds == 0 and not target.balance_section then
+				local best_section, best_score
+				for j = 1, #target.compatible do
+					local section = target.compatible[j]
+					if (stock[section] or 0) > 0 and section_matches_mark(section, target.mark) then
+						local group = by_key[section]
+						local members = group and #group.mags or 0
+						local score = (stock[section] or 0) / (members + 1)
+						if not best_score or score > best_score then
+							best_section, best_score = section, score
+						end
+					end
+				end
+				if best_section then
+					target.balance_section = best_section
+					local group = add_balance_group(groups, by_key, best_section, best_section)
+					group.mags[#group.mags + 1] = target
+				end
+			end
+		end
+	else
+		for i = 1, #candidates do
+			local target = candidates[i]
+			target.balance_sections = {}
+			for j = 1, #target.compatible do
+				local section = target.compatible[j]
+				target.balance_sections[#target.balance_sections + 1] = section
+			end
+			if #target.balance_sections > 0 then
+				local signature = table.concat(target.balance_sections, "\30")
+				target.balance_group_key = signature
+				local group = add_balance_group(groups, by_key, signature)
+				group.mags[#group.mags + 1] = target
+				for j = 1, #target.rounds do
+					local section = target.rounds[j]
+					group.loaded_by_section = group.loaded_by_section or {}
+					group.loaded_by_section[section] = (group.loaded_by_section[section] or 0) + 1
+				end
+			end
+		end
+
+		local sections = {}
+		for section, count in pairs(stock) do
+			if count > 0 then sections[#sections + 1] = section end
+		end
+		table.sort(sections)
+		table.sort(groups, function(a, b) return a.key < b.key end)
+		for i = 1, #sections do
+			local section = sections[i]
+			local best_group, best_loaded, best_capacity = nil, -1, -1
+			for j = 1, #groups do
+				local group = groups[j]
+				local member = group.mags[1]
+				if #group.mags > 0 and section_allowed(member.balance_sections, section) then
+					local loaded = group.loaded_by_section and group.loaded_by_section[section] or 0
+					local capacity = 0
+					for k = 1, #group.mags do
+						capacity = capacity + group.mags[k].capacity
+					end
+					if loaded > best_loaded or (loaded == best_loaded and capacity > best_capacity) then
+						best_group, best_loaded, best_capacity = group, loaded, capacity
+					end
+				end
+			end
+			if best_group then
+				best_group.section_set[section] = true
+				best_group.sections[#best_group.sections + 1] = section
+			end
+		end
+	end
+
+	for i = 1, #groups do
+		local group = groups[i]
+		local valid_mags = {}
+		for j = 1, #group.mags do
+			local target = group.mags[j]
+			local valid = true
+			for k = 1, #target.rounds do
+				if not group.section_set[target.rounds[k]] then
+					valid = false
+					break
+				end
+			end
+			if valid then
+				valid_mags[#valid_mags + 1] = target
+			end
+		end
+		group.mags = valid_mags
+	end
+
+	local selected, selected_ids, eligible_groups = {}, {}, {}
+	for i = 1, #groups do
+		local group = groups[i]
+		table.sort(group.sections)
+		if #group.sections > 0 and #group.mags > 0 then
+			eligible_groups[#eligible_groups + 1] = group
+			table.sort(group.mags, function(a, b) return a.mag:id() < b.mag:id() end)
+			for j = 1, #group.mags do
+				local target = group.mags[j]
+				local id = target.mag:id()
+				if not selected_ids[id] then
+					selected_ids[id] = true
+					selected[#selected + 1] = target
+				end
+			end
+		end
+	end
+	table.sort(groups, function(a, b) return a.key < b.key end)
+	table.sort(selected, function(a, b) return a.mag:id() < b.mag:id() end)
+	table.sort(eligible_groups, function(a, b) return a.key < b.key end)
+	return eligible_groups, selected
+end
+
+local function distribute_evenly(total, mags)
+	local targets, active = {}, {}
+	for i = 1, #mags do
+		targets[i] = 0
+		if mags[i].capacity > 0 then active[#active + 1] = i end
+	end
+
+	local remaining = total
+	while remaining > 0 and #active > 0 do
+		local share = math.floor(remaining / #active)
+		if share == 0 then
+			for i = 1, remaining do
+				targets[active[i]] = targets[active[i]] + 1
+			end
+			break
+		end
+
+		local saturated = false
+		for i = #active, 1, -1 do
+			local index = active[i]
+			local space = mags[index].capacity - targets[index]
+			if space <= share then
+				targets[index] = mags[index].capacity
+				remaining = remaining - space
+				table.remove(active, i)
+				saturated = true
+			end
+		end
+		if not saturated then
+			local remainder = remaining % #active
+			for i = 1, #active do
+				targets[active[i]] = targets[active[i]] + share + (i <= remainder and 1 or 0)
+			end
+			remaining = 0
+		end
+	end
+	return targets
+end
+
+local function count_boxes_for_section(boxes, section)
+	local count = 0
+	local list = boxes[section] or {}
+	for i = 1, #list do
+		count = count + (list[i]:ammo_get_count() or 0)
+	end
+	return count
+end
+
+local function create_balance_unload_plan(groups, boxes)
+	local unload_plan, expected_ammo = {}, {}
+	for i = 1, #groups do
+		local group = groups[i]
+		local total = 0
+		for j = 1, #group.sections do
+			local section = group.sections[j]
+			local count = count_boxes_for_section(boxes, section)
+			expected_ammo[section] = count
+			total = total + count
+		end
+		for j = 1, #group.mags do
+			total = total + #group.mags[j].rounds
+		end
+
+		local targets = distribute_evenly(total, group.mags)
+		for j = 1, #group.mags do
+			local target = group.mags[j]
+			target.balance_target_count = targets[j]
+			local excess = math.max(0, #target.rounds - targets[j])
+			if excess > 0 then
+				local sections = {}
+				for k = 1, excess do
+					local section = target.rounds[#target.rounds - k + 1]
+					sections[#sections + 1] = section
+					expected_ammo[section] = (expected_ammo[section] or count_boxes_for_section(boxes, section)) + 1
+				end
+				unload_plan[#unload_plan + 1] = {
+					target = target,
+					sections = sections,
+				}
+			end
+		end
+	end
+	return unload_plan, expected_ammo
+end
+
+local function balance_boxes_ready(queue, boxes)
+	for i = 1, #queue.groups do
+		local group = queue.groups[i]
+		for j = 1, #group.sections do
+			local section = group.sections[j]
+			local expected = queue.expected_ammo[section] or 0
+			if count_boxes_for_section(boxes, section) < expected then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+local function mark_balance_mag_touched(queue, mag)
+	queue.balance_touched_ids = queue.balance_touched_ids or {}
+	local id = mag:id()
+	if not queue.balance_touched_ids[id] then
+		queue.balance_touched_ids[id] = true
+		queue.touched = queue.touched + 1
+	end
+end
+
+local function has_mark_conflict(target)
+	if not target.mark then return false end
+	local mag_data = magazine_binder.get_data(target.mag:id())
+	if not mag_data or not mag_data.loaded then return false end
+	if not (priler_ammo_classifier and priler_ammo_classifier.in_group) then return true end
+
+	for i = 1, #mag_data.loaded do
+		if not priler_ammo_classifier.in_group(mag_data.loaded[i], target.mark) then
+			return true
+		end
+	end
+	return false
+end
+
+local function apply_marked_ammo_mode(mags, mode, animated_replace)
+	local selected, skipped, replaced = {}, 0, false
+
+	for i = 1, #mags do
+		local target = mags[i]
+		if not has_mark_conflict(target) or mode == 1 then
+			selected[#selected + 1] = target
+		elseif mode == 2 then
+			if animated_replace then
+				target.needs_replace = true
+				selected[#selected + 1] = target
+				replaced = true
+			elseif magazines.fast_unload_magazine then
+				magazines.fast_unload_magazine(target.mag)
+				selected[#selected + 1] = target
+				replaced = true
+			else
+				skipped = skipped + 1
+				dbg("mag %s pominiety: fast_unload_magazine niedostepne", target.mag:id())
+			end
+		else
+			skipped = skipped + 1
+			dbg("mag %s pominiety: zaladowana amunicja nie pasuje do oznaczenia %s", target.mag:id(), target.mark)
+		end
+	end
+
+	return selected, skipped, replaced
+end
+
+-- laduje jeden naboj do magazynka; false oznacza, ze nie mozna go juz uzupelniac
+local function top_up_one_round(mag, boxes, ammo_section)
+	local id = mag:id()
+	local mag_data = magazine_binder.get_data(id)
+	if not mag_data or not mag_data.loaded then return false end
+
+	local sec = mag_data.section or mag:section()
+	local capacity = SYS_GetParam(2, sec, "max_mag_size") or 0
+	local missing = capacity - #mag_data.loaded
+	if missing <= 0 then return false end
+
+	local ammo_sec = ammo_section or pick_ammo_section(mag_data.loaded)
+	if not ammo_sec then
+		dbg("mag %s (%s) pusty - pomijam", id, sec)
+		return false
+	end
+
+	local list = boxes[ammo_sec]
+	if not list or #list == 0 then
+		dbg("mag %s: brak amunicji %s w ekwipunku", id, ammo_sec)
+		return false
+	end
+
+	local box, available
+	while #list > 0 do
+		box = list[#list]
+		available = box:ammo_get_count()
+		if available > 0 then break end
+
+		local se_box = alife_object(box:id())
+		if se_box then alife_release(se_box) end
+		list[#list] = nil
+	end
+
+	if not box or available <= 0 then
+		dbg("mag %s: brak amunicji %s w ekwipunku", id, ammo_sec)
+		return false
+	end
+
+	stack.push(mag_data.loaded, ammo_sec)
+	if available == 1 then
+		-- pudelko wyczerpane - usuwamy je (tak samo jak robi to Mags Reloaded)
+		local se_box = alife_object(box:id())
+		if se_box then alife_release(se_box) end
+		list[#list] = nil
+	else
+		box:ammo_set_count(available - 1)
+	end
+
+	magazine_binder.set_data(id, mag_data)
+	dbg("mag %s: +1 x %s (razem %s/%s)", id, ammo_sec, #mag_data.loaded, capacity)
+	return true, #mag_data.loaded >= capacity
+end
+
+local function loaded_round_count(mag)
+	local mag_data = magazine_binder.get_data(mag:id())
+	return mag_data and mag_data.loaded and #mag_data.loaded or 0
+end
+
+local autoload_queue
+local pending_autoload_start
+local original_balance_load_round
+local original_balance_unload_round
+
+local function install_balance_round_hooks()
+	if not original_balance_load_round and magazines and magazines.load_one_round then
+		original_balance_load_round = magazines.load_one_round
+		magazines.load_one_round = function(mag, capacity, silent)
+			local done = original_balance_load_round(mag, capacity, silent)
+			local queue = autoload_queue
+			if queue and queue.operation == "balance" and queue.aml_phase == "balance_load"
+				and queue.aml_target_mag and queue.aml_target_mag.mag:id() == mag:id()
+				and loaded_round_count(mag) >= queue.aml_target_count then
+				return true
+			end
+			return done
+		end
+	end
+	if not original_balance_unload_round and magazines and magazines.unload_one_round then
+		original_balance_unload_round = magazines.unload_one_round
+		magazines.unload_one_round = function(mag, silent)
+			local done = original_balance_unload_round(mag, silent)
+			local queue = autoload_queue
+			if queue and queue.operation == "balance" and queue.aml_phase == "balance_unload"
+				and queue.aml_target_mag and queue.aml_target_mag.mag:id() == mag:id()
+				and loaded_round_count(mag) <= queue.aml_target_count then
+				return true
+			end
+			return done
+		end
+	end
+	return original_balance_load_round ~= nil and original_balance_unload_round ~= nil
+end
+
+local function set_autoload_spinner(queue, mag)
+	local id = mag and mag:id() or nil
+	if queue.spinner_id == id then return end
+
+	if queue.spinner_id and mag_load_spinner and mag_load_spinner.finish then
+		mag_load_spinner.finish(queue.spinner_id)
+	end
+	queue.spinner_id = id
+
+	if id and mag_load_spinner and mag_load_spinner.begin then
+		mag_load_spinner.begin(id, false)
+	end
+end
+
+local function get_mag_load_delay(mag)
+	if not magazines or not magazines.get_mag_time then
+		dbg("blad: magazines.get_mag_time niedostepne; sprawdz wersje Mags Reloaded")
+		return nil
+	end
+
+	local mag_data = magazine_binder.get_data(mag:id())
+	local sec = (mag_data and mag_data.section) or mag:section()
+	local delay = magazines.get_mag_time(sec, false)
+	if type(delay) ~= "number" or delay <= 0 then
+		dbg("blad: nieprawidlowa predkosc ladowania dla magazynka %s (%s)", mag:id(), tostring(delay))
+		return nil
+	end
+
+	local speed = tonumber(get_cfg("speed", DEFAULT_SPEED))
+	if not speed or speed <= 0 then
+		dbg("blad: nieprawidlowa predkosc autoload (%s)", tostring(speed))
+		return nil
+	end
+	return delay / speed
+end
+
+local function get_aml_driver()
+	if not (magazines_aml and magazines_aml.get_driver) then return nil end
+	if not (
+		magazines
+		and magazines.begin_mag_load
+		and magazines.get_load_driver
+		and magazines.action_in_progress
+		and magazines.action_start_magload
+		and magazines.begin_round_loop
+		and magazines.get_mag_time
+		and magazines.SEAM_CONTRACT
+	) then
+		return nil, "host_api"
+	end
+	if magazines_aml.CONTRACT ~= magazines.SEAM_CONTRACT then
+		return nil, "contract"
+	end
+	if not magazines_aml.set_speed then
+		return nil, "speed_api"
+	end
+
+	local driver = magazines_aml.get_driver()
+	if magazines.get_load_driver() ~= driver then
+		return nil, "disabled"
+	end
+
+	local load_behavior = magazines_mcm and magazines_mcm.get_config and tonumber(magazines_mcm.get_config("load_behavior"))
+	if load_behavior ~= 0 then
+		return nil, "fast_mode"
+	end
+	return driver
+end
+
+local function get_aml_mcm_speed(key)
+	if ui_mcm then
+		local value = tonumber(ui_mcm.get("magazines/aml_compat/" .. key))
+		if value and value > 0 then return value end
+	end
+	return 1.0
+end
+
+local function set_aml_autoload_speed(queue)
+	if not queue.aml_driver then return end
+	queue.aml_base_load_speed = get_aml_mcm_speed("aml_anim_load_speed")
+	queue.aml_base_unload_speed = get_aml_mcm_speed("aml_anim_unload_speed")
+	local speed = tonumber(get_cfg("speed", DEFAULT_SPEED)) or DEFAULT_SPEED
+	magazines_aml.set_speed(queue.aml_base_load_speed * speed, queue.aml_base_unload_speed)
+	queue.aml_speed_overridden = true
+end
+
+local function restore_aml_speed(queue)
+	if queue.aml_speed_overridden and magazines_aml and magazines_aml.set_speed then
+		magazines_aml.set_speed(queue.aml_base_load_speed, queue.aml_base_unload_speed)
+		queue.aml_speed_overridden = false
+	end
+end
+
+local function notify(message)
+	if actor_menu and actor_menu.set_msg then
+		actor_menu.set_msg(1, message, 3)
+	end
+end
+
+local function report(message)
+	if get_cfg("show_report", DEFAULT_SHOW_REPORT) then
+		notify(message)
+	end
+end
+
+local function localized(english, polish)
+	local language = tonumber(get_cfg("language", DEFAULT_LANGUAGE))
+	if language == 0 then
+		return english
+	end
+	return polish
+end
+
+local function finish_autoload(interrupted, reason, clear_spinner)
+	local queue = autoload_queue
+	if not queue then return end
+	if queue.aml_active then
+		local target = queue.aml_target_mag or queue.mags[queue.mag_index]
+		local mag_data = target and magazine_binder.get_data(target.mag:id())
+		local loaded = mag_data and mag_data.loaded and #mag_data.loaded or queue.aml_before
+		if queue.aml_phase == "unload" or queue.aml_phase == "balance_unload" then
+			local removed = math.max(0, queue.aml_before - loaded)
+			queue.unloaded_rounds = (queue.unloaded_rounds or 0) + removed
+			if queue.operation == "unload_all" and loaded == 0 and queue.aml_before > 0 then
+				queue.touched = queue.touched + 1
+			elseif queue.operation == "balance" and removed > 0 then
+				mark_balance_mag_touched(queue, target.mag)
+			end
+		elseif queue.aml_phase == "load" or queue.aml_phase == "balance_load" then
+			local added = math.max(0, loaded - queue.aml_before)
+			queue.total = queue.total + added
+			if queue.operation == "balance" and added > 0 then
+				mark_balance_mag_touched(queue, target.mag)
+			elseif added > 0 and not queue.mag_touched then
+				queue.touched = queue.touched + 1
+				queue.mag_touched = true
+			end
+		end
+	end
+	if queue.operation == "balance" and queue.balance_action_started and magazines and magazines.do_interrupt then
+		magazines.do_interrupt()
+		queue.balance_action_started = false
+	elseif interrupted and (queue.aml_active or queue.round_unload_active) and magazines and magazines.do_interrupt then
+		magazines.do_interrupt()
+	end
+	restore_aml_speed(queue)
+	if clear_spinner and mag_load_spinner and mag_load_spinner.clear_all then
+		mag_load_spinner.clear_all()
+		queue.spinner_id = nil
+	else
+		set_autoload_spinner(queue, nil)
+	end
+	autoload_queue = nil
+
+	if queue.total > 0 or (queue.unloaded_rounds or 0) > 0 then
+		magazines.timed_refresh()
+	end
+
+	local state
+	if reason == "closed" then
+		state = localized("cancelled (inventory closed)", "przerwano (zamknieto ekwipunek)")
+	elseif reason == "key_cancelled" then
+		state = localized("cancelled by key", "przerwano klawiszem")
+	elseif reason == "spinner_cancelled" then
+		state = localized("cancelled using the spinner", "przerwano kliknieciem w spinner")
+	elseif reason == "aml_unavailable" then
+		state = localized("AML driver unavailable", "sterownik AML niedostepny")
+	elseif reason == "action" then
+		state = localized("interrupted by another action", "przerwano przez inna akcje")
+	elseif reason == "speed_error" then
+		state = localized("Mags Reloaded speed error", "blad predkosci Mags Reloaded")
+	elseif reason == "aml_no_progress" then
+		state = localized("AML driver made no progress", "sterownik AML nie wykonal postepu")
+		notify(localized("Mags Autoload: AML could not load or unload a magazine", "Mags Autoload: AML nie mogl zaladowac ani rozladowac magazynka"))
+	elseif reason == "balance_no_ammo" then
+		state = localized("balancing stopped: expected ammo was unavailable", "rozdzielanie przerwane: brak oczekiwanej amunicji")
+		notify(localized("Mags Autoload: balancing stopped because planned ammo is unavailable", "Mags Autoload: rozdzielanie przerwane, brak zaplanowanej amunicji"))
+	elseif reason == "balance_unload_error" then
+		state = localized("balancing stopped: could not unload the planned rounds", "rozdzielanie przerwane: nie udalo sie wyladowac zaplanowanych naboi")
+		notify(localized("Mags Autoload: balancing stopped because magazine contents changed", "Mags Autoload: rozdzielanie przerwane, zawartosc magazynka ulegla zmianie"))
+	elseif reason == "balance_aml_error" then
+		state = localized("balancing stopped: AML animation did not complete as planned", "rozdzielanie przerwane: animacja AML nie zakonczyla sie zgodnie z planem")
+		notify(localized("Mags Autoload: balancing stopped because the animated round count did not match the plan", "Mags Autoload: rozdzielanie przerwane, liczba naboi z animacji nie pasowala do planu"))
+	else
+		state = interrupted and localized("interrupted", "przerwano") or localized("complete", "gotowe")
+	end
+	if queue.operation == "balance" then
+		report(string.format(
+			localized("Mags Autoload: %s; changed %d magazines (unloaded %d, loaded %d rounds)", "Mags Autoload: %s; zmieniono %d magazynkow (wyladowano %d, zaladowano %d naboi)"),
+			state,
+			queue.touched,
+			queue.unloaded_rounds or 0,
+			queue.total
+		))
+	elseif queue.operation == "unload_all" then
+		report(string.format(
+			localized("Mags Autoload: %s; unloaded %d magazines, %d rounds", "Mags Autoload: %s; rozladowano %d magazynkow, %d naboi"),
+			state,
+			queue.touched,
+			queue.unloaded_rounds or queue.total
+		))
+	else
+		report(string.format(
+			localized("Mags Autoload: %s, %d magazines, +%d rounds", "Mags Autoload: %s, magazynkow: %d, naboi: +%d"),
+			state,
+			queue.touched,
+			queue.total
+		))
+	end
+	dbg("%s: %s magazynkow, +%s naboi", state, queue.touched, queue.total)
+end
+
+local original_magload_interrupt
+local function install_spinner_cancel_hook()
+	if original_magload_interrupt or not (magazines and magazines.do_interrupt_magload) then
+		return
+	end
+
+	original_magload_interrupt = magazines.do_interrupt_magload
+	magazines.do_interrupt_magload = function(...)
+		if autoload_queue then
+			finish_autoload(true, "spinner_cancelled", true)
+		end
+		return original_magload_interrupt(...)
+	end
+end
+
+local function aml_fallback_message(reason)
+	if reason == "host_api" then
+		return localized("AML detected, but its Mags Reloaded host API is unavailable; using standard loading", "Wykryto AML, ale brak jego API Mags Reloaded; uzywam standardowego ladowania")
+	elseif reason == "contract" then
+		return localized("AML and Mags Reloaded contracts do not match; using standard loading", "Kontrakty AML i Mags Reloaded nie pasuja; uzywam standardowego ladowania")
+	elseif reason == "speed_api" then
+		return localized("AML speed API unavailable; using standard loading", "Brak API predkosci AML; uzywam standardowego ladowania")
+	elseif reason == "disabled" then
+		return localized("AML compatibility is disabled in Mags Reloaded MCM; using standard loading", "Kompatybilnosc AML jest wylaczona w MCM Mags Reloaded; uzywam standardowego ladowania")
+	elseif reason == "fast_mode" then
+		return localized("Set Mags Reloaded loading to Individual to use AML; using standard loading", "Ustaw ladowanie Mags Reloaded na Individual, aby uzyc AML; uzywam standardowego ladowania")
+	end
+	return nil
+end
+
+local function begin_autoload(mags, boxes, delay, refresh_boxes, skipped, aml_driver, fallback_reason)
+	autoload_queue = {
+		mags = mags,
+		boxes = boxes,
+		aml_driver = aml_driver,
+		aml_fallback_reason = fallback_reason,
+		refresh_boxes = refresh_boxes,
+		mag_index = 1,
+		mag_touched = false,
+		total = 0,
+		touched = 0,
+		aml_active = false,
+		next_at = time_global() + (aml_driver and 0 or delay * 1000),
+	}
+	if aml_driver then
+		set_aml_autoload_speed(autoload_queue)
+	else
+		set_autoload_spinner(autoload_queue, mags[1].mag)
+	end
+	local message = localized("Mags Autoload: loading magazine", "Mags Autoload: ladowanie magazynka")
+	if aml_driver then
+		message = localized("Mags Autoload: AML animation enabled", "Mags Autoload: animacja AML wlaczona")
+	elseif fallback_reason then
+		message = aml_fallback_message(fallback_reason)
+	end
+	if skipped > 0 then
+		message = string.format("%s; %s", message, string.format(
+			localized("skipped %d incompatible magazines", "pominieto %d niezgodnych magazynkow"),
+			skipped
+		))
+	end
+	notify(message)
+	dbg("rozpoczeto ladowanie %s magazynkow po kolei", #mags)
+end
+
+local function find_ammo_box(boxes, ammo_section)
+	local list = boxes[ammo_section]
+	if not list then return nil end
+	for i = #list, 1, -1 do
+		local box = list[i]
+		if box:ammo_get_count() > 0 then
+			return box
+		end
+	end
+	return nil
+end
+
+local function start_next_aml_magazine(queue)
+	if queue.aml_wait_until and time_global() < queue.aml_wait_until then
+		return true
+	end
+	queue.aml_wait_until = nil
+
+	while queue.mag_index <= #queue.mags do
+		local target = queue.mags[queue.mag_index]
+		local mag_data = magazine_binder.get_data(target.mag:id())
+		if mag_data and mag_data.loaded then
+			local sec = mag_data.section or target.mag:section()
+			local capacity = SYS_GetParam(2, sec, "max_mag_size") or 0
+			if #mag_data.loaded < capacity then
+				if target.needs_replace and #mag_data.loaded > 0 then
+					queue.aml_before = #mag_data.loaded
+					queue.aml_phase = "unload"
+					magazines.action_start_magload()
+					magazines.begin_round_loop(target.mag, true, nil, magazines.get_mag_time(sec, true))
+					queue.aml_active = true
+					return true
+				else
+					target.needs_replace = false
+					local boxes = collect_ammo_boxes()
+					local box = find_ammo_box(boxes, target.ammo_section)
+					if box then
+						dbg("AML autoload mag=%s selected=%s box=%s", target.mag:id(), tostring(target.ammo_section), box:section())
+						queue.aml_before = #mag_data.loaded
+						queue.aml_phase = "load"
+						if magazines.begin_mag_load(target.mag, box) then
+							queue.aml_active = true
+							return true
+						end
+						finish_autoload(true, "aml_no_progress", true)
+						return false
+					end
+				end
+			end
+		end
+		queue.mag_index = queue.mag_index + 1
+		queue.mag_touched = false
+	end
+
+	finish_autoload(false)
+	return false
+end
+
+local function start_next_queue_unload(queue)
+	if queue.aml_wait_until and time_global() < queue.aml_wait_until then
+		return true
+	end
+	queue.aml_wait_until = nil
+
+	while queue.mag_index <= #queue.mags do
+		local target = queue.mags[queue.mag_index]
+		local mag_data = magazine_binder.get_data(target.mag:id())
+		if mag_data and mag_data.loaded and #mag_data.loaded > 0 then
+			local section = mag_data.section or target.mag:section()
+			queue.aml_before = #mag_data.loaded
+			queue.aml_phase = "unload"
+			magazines.action_start_magload()
+			magazines.begin_round_loop(target.mag, true, nil, magazines.get_mag_time(section, true))
+			queue.aml_active = true
+			return true
+		end
+		queue.mag_index = queue.mag_index + 1
+	end
+
+	queue.aml_active = false
+	queue.aml_phase = nil
+	if queue.operation == "balance" then
+		queue.phase = "settle"
+		queue.next_at = time_global() + 300
+		magazines.inventory_refresh(2)
+	else
+		finish_autoload(false)
+	end
+	return false
+end
+
+local function process_queue_unload(queue)
+	if not queue.aml_active then
+		start_next_queue_unload(queue)
+		return
+	end
+
+	local action_active = magazines.action_in_progress and magazines.action_in_progress()
+	local driver_active = queue.aml_driver.is_animating and queue.aml_driver.is_animating()
+	if action_active or driver_active then return end
+
+	local target = queue.mags[queue.mag_index]
+	local mag_data = target and magazine_binder.get_data(target.mag:id())
+	local loaded = mag_data and mag_data.loaded and #mag_data.loaded or queue.aml_before
+	if loaded >= queue.aml_before then
+		finish_autoload(true, "aml_no_progress", true)
+		return
+	end
+
+	queue.unloaded_rounds = (queue.unloaded_rounds or 0) + queue.aml_before - loaded
+	queue.aml_active = false
+	if loaded > 0 then
+		queue.aml_before = loaded
+		queue.aml_wait_until = time_global() + 100
+	else
+		if queue.operation == "unload_all" then
+			queue.touched = queue.touched + 1
+		else
+			queue.unloaded_mags = (queue.unloaded_mags or 0) + 1
+		end
+		queue.mag_index = queue.mag_index + 1
+	end
+	start_next_queue_unload(queue)
+end
+
+local function prepare_balance_targets(queue, boxes)
+	local targets, available = {}, {}
+	for i = 1, #queue.groups do
+		for j = 1, #queue.groups[i].sections do
+			local section = queue.groups[i].sections[j]
+			if available[section] == nil then
+				available[section] = count_boxes_for_section(boxes, section)
+			end
+		end
+	end
+
+	for i = 1, #queue.groups do
+		local group = queue.groups[i]
+		local deficits = {}
+		for j = 1, #group.mags do
+			local target = group.mags[j]
+			local current = loaded_round_count(target.mag)
+			if current > target.balance_target_count then
+				return nil
+			end
+			local need = target.balance_target_count - current
+			target.balance_plan = {}
+			deficits[j] = need
+		end
+
+		for j = 1, #group.mags do
+			local target = group.mags[j]
+			for _ = 1, deficits[j] do
+				local chosen_section, chosen_count = nil, 0
+				local preferred_count = target.preferred_ammo and (available[target.preferred_ammo] or 0) or 0
+				if preferred_count > 0 then
+					chosen_section, chosen_count = target.preferred_ammo, preferred_count
+				else
+					for k = 1, #group.sections do
+						local section = group.sections[k]
+						local count = available[section] or 0
+						if count > chosen_count then
+							chosen_section, chosen_count = section, count
+						end
+					end
+				end
+				if not chosen_section then return nil end
+				target.balance_plan[#target.balance_plan + 1] = chosen_section
+				available[chosen_section] = available[chosen_section] - 1
+			end
+			if #target.balance_plan > 0 then
+				target.balance_plan_index = 1
+				targets[#targets + 1] = target
+				dbg("balance plan mag=%s preferred=%s load=%s", target.mag:id(), tostring(target.preferred_ammo), table.concat(target.balance_plan, ","))
+			end
+		end
+	end
+	table.sort(targets, function(a, b) return a.mag:id() < b.mag:id() end)
+	return targets
+end
+
+local function advance_balance_unload(queue, target, removed, now)
+	queue.unloaded_rounds = queue.unloaded_rounds + removed
+	if removed > 0 then mark_balance_mag_touched(queue, target.mag) end
+	queue.aml_active = false
+	queue.aml_phase = nil
+	queue.aml_target_mag = nil
+	queue.aml_cutoff_requested = nil
+	queue.balance_action_started = false
+	queue.round_unload_active = false
+	queue.unload_index = queue.unload_index + 1
+	queue.next_at = now + 100
+
+	local next_plan = queue.unload_plan[queue.unload_index]
+	if next_plan then
+		set_autoload_spinner(queue, next_plan.target.mag)
+	else
+		queue.phase = "settle"
+		queue.next_at = now + 300
+		magazines.inventory_refresh(2)
+	end
+end
+
+local function process_balance_aml_unload(queue, plan, now)
+	local target = plan.target
+	if not queue.aml_active then
+		local before = loaded_round_count(target.mag)
+		if before - #plan.sections ~= target.balance_target_count then
+			finish_autoload(true, "balance_unload_error", true)
+			return
+		end
+		queue.aml_active = true
+		queue.aml_phase = "balance_unload"
+		queue.aml_target_mag = target
+		queue.aml_before = before
+		queue.aml_target_count = target.balance_target_count
+		queue.aml_cutoff_requested = false
+		queue.balance_action_started = true
+		magazines.action_start_magload()
+		magazines.begin_round_loop(
+			target.mag,
+			true,
+			nil,
+			magazines.get_mag_time(target.section, true)
+		)
+		return
+	end
+
+	local loaded = loaded_round_count(target.mag)
+	if loaded < queue.aml_target_count then
+		finish_autoload(true, "balance_unload_error", true)
+		return
+	end
+	if loaded == queue.aml_target_count and not queue.aml_cutoff_requested then
+		queue.aml_cutoff_requested = true
+	end
+
+	local action_active = magazines.action_in_progress and magazines.action_in_progress()
+	local driver_active = queue.aml_driver.is_animating and queue.aml_driver.is_animating()
+	if not action_active and not driver_active then
+		local removed = queue.aml_before - loaded
+		if loaded ~= queue.aml_target_count or removed ~= #plan.sections then
+			finish_autoload(true, "balance_unload_error", true)
+			return
+		end
+		advance_balance_unload(queue, target, removed, now)
+	end
+end
+
+local function process_balance_unload(queue)
+	local now = time_global()
+	if now < queue.next_at then return end
+
+	local plan = queue.unload_plan[queue.unload_index]
+	if not plan then
+		queue.phase = "settle"
+		queue.next_at = now + 300
+		magazines.inventory_refresh(2)
+		return
+	end
+	if queue.aml_driver then
+		process_balance_aml_unload(queue, plan, now)
+		return
+	end
+
+	local target = plan.target
+	if not queue.round_unload_active then
+		queue.round_unload_active = true
+		queue.round_unload_index = 1
+		queue.balance_action_started = true
+		magazines.action_start_magload()
+		set_autoload_spinner(queue, target.mag)
+	end
+	if magazines.action_in_progress and not magazines.action_in_progress() then
+		finish_autoload(true, "balance_unload_error", true)
+		return
+	end
+
+	local mag_data = magazine_binder.get_data(target.mag:id())
+	local before = mag_data and mag_data.loaded and #mag_data.loaded or 0
+	local expected_section = plan.sections[queue.round_unload_index]
+	if before <= 0 or not expected_section or mag_data.loaded[before] ~= expected_section then
+		finish_autoload(true, "balance_unload_error", true)
+		return
+	end
+
+	magazines.unload_one_round(target.mag, true)
+	local after = loaded_round_count(target.mag)
+	if before - after ~= 1 then
+		finish_autoload(true, "balance_unload_error", true)
+		return
+	end
+
+	queue.unloaded_rounds = queue.unloaded_rounds + 1
+	queue.round_unload_index = queue.round_unload_index + 1
+	mark_balance_mag_touched(queue, target.mag)
+	utils_obj.play_sound("magazines\\ammo_load" .. math.random(1, 7))
+	magazines.inventory_refresh(2)
+
+	local delay = magazines.get_mag_time(target.section, true) or 0.4
+	queue.next_at = now + delay * 1000
+	if queue.round_unload_index > #plan.sections then
+		magazines.do_interrupt()
+		queue.balance_action_started = false
+		queue.round_unload_active = false
+		queue.unload_index = queue.unload_index + 1
+		local next_plan = queue.unload_plan[queue.unload_index]
+		if next_plan then
+			set_autoload_spinner(queue, next_plan.target.mag)
+		else
+			queue.phase = "settle"
+			queue.next_at = now + 300
+		end
+	end
+end
+
+local function start_balance_aml_load(queue, target)
+	local first = target.balance_plan_index
+	local section = target.balance_plan[first]
+	local batch_count = 0
+	while target.balance_plan[first + batch_count] == section do
+		batch_count = batch_count + 1
+	end
+	local box = find_ammo_box(queue.boxes, section)
+	if not box then return false end
+
+	queue.aml_before = loaded_round_count(target.mag)
+	queue.aml_target_count = queue.aml_before + batch_count
+	queue.aml_load_count = batch_count
+	queue.aml_load_target = target
+	queue.aml_target_mag = target
+	queue.aml_phase = "balance_load"
+	queue.aml_cutoff_requested = false
+	queue.aml_active = true
+	queue.balance_action_started = true
+	if not magazines.begin_mag_load(target.mag, box) then
+		return false
+	end
+	return true
+end
+
+local function process_balance_aml_load(queue, now)
+	local target = queue.aml_load_target
+	local loaded = loaded_round_count(target.mag)
+	if loaded > queue.aml_target_count then
+		finish_autoload(true, "balance_aml_error", true)
+		return
+	end
+	if loaded == queue.aml_target_count and not queue.aml_cutoff_requested then
+		queue.aml_cutoff_requested = true
+	end
+
+	local action_active = magazines.action_in_progress and magazines.action_in_progress()
+	local driver_active = queue.aml_driver.is_animating and queue.aml_driver.is_animating()
+	if not action_active and not driver_active then
+		local added = math.max(0, loaded - queue.aml_before)
+		if added ~= queue.aml_load_count then
+			finish_autoload(true, "balance_no_ammo", true)
+			return
+		end
+		queue.total = queue.total + added
+		mark_balance_mag_touched(queue, target.mag)
+		target.balance_plan_index = target.balance_plan_index + added
+		queue.aml_active = false
+		queue.balance_action_started = false
+		queue.aml_phase = nil
+		queue.aml_load_target = nil
+		queue.aml_target_mag = nil
+		queue.aml_cutoff_requested = nil
+		queue.boxes = collect_ammo_boxes()
+		queue.next_at = now + 100
+	end
+end
+
+local function process_balance_queue(queue)
+	if not inventory_open() then
+		finish_autoload(true, "closed", true)
+		return
+	end
+	if queue.phase == "unload" then
+		process_balance_unload(queue)
+		return
+	end
+	if queue.phase == "settle" then
+		if time_global() < queue.next_at then return end
+		local boxes = collect_ammo_boxes()
+		if not balance_boxes_ready(queue, boxes) then
+			queue.settle_attempts = (queue.settle_attempts or 0) + 1
+			if queue.settle_attempts < 30 then
+				queue.next_at = time_global() + 100
+				return
+			end
+			finish_autoload(true, "balance_no_ammo", true)
+			return
+		end
+		queue.load_targets = prepare_balance_targets(queue, boxes)
+		if not queue.load_targets then
+			finish_autoload(true, "balance_no_ammo", true)
+			return
+		end
+		if #queue.load_targets == 0 then
+			finish_autoload(false)
+			return
+		end
+		queue.boxes = boxes
+		queue.phase = "load"
+		queue.load_index = 1
+		queue.next_at = time_global()
+		set_autoload_spinner(queue, queue.load_targets[1].mag)
+		return
+	end
+
+	if queue.aml_driver and queue.aml_active then
+		process_balance_aml_load(queue, time_global())
+		return
+	end
+	if magazines.action_in_progress and magazines.action_in_progress() then
+		finish_autoload(true, "action")
+		return
+	end
+	local now = time_global()
+	if now < queue.next_at then return end
+
+	local target = queue.load_targets[queue.load_index]
+	if not target then
+		finish_autoload(false)
+		return
+	end
+	local section = target.balance_plan[target.balance_plan_index]
+	if not section then
+		queue.load_index = queue.load_index + 1
+		if not queue.load_targets[queue.load_index] then
+			finish_autoload(false)
+			return
+		end
+		target = queue.load_targets[queue.load_index]
+		target.balance_plan_index = 1
+		set_autoload_spinner(queue, target.mag)
+		section = target.balance_plan[target.balance_plan_index]
+	end
+
+	if queue.aml_driver then
+		if not start_balance_aml_load(queue, target) then
+			finish_autoload(true, "balance_aml_error", true)
+		end
+		return
+	end
+
+	local before = loaded_round_count(target.mag)
+	local loaded = top_up_one_round(target.mag, queue.boxes, section)
+	local added = math.max(0, loaded_round_count(target.mag) - before)
+	if not loaded or added <= 0 then
+		finish_autoload(true, "balance_no_ammo", true)
+		return
+	end
+	queue.total = queue.total + added
+	mark_balance_mag_touched(queue, target.mag)
+	target.balance_plan_index = target.balance_plan_index + added
+	utils_obj.play_sound("magazines\\ammo_load" .. math.random(1, 7))
+	magazines.inventory_refresh(2)
+
+	local delay = get_mag_load_delay(target.mag)
+	if not delay then
+		finish_autoload(true, "speed_error")
+		return
+	end
+	queue.next_at = now + delay * 1000
+end
+
+local function process_aml_queue(queue)
+	if not queue.aml_active then
+		start_next_aml_magazine(queue)
+		return
+	end
+
+	local action_active = magazines.action_in_progress and magazines.action_in_progress()
+	local driver_active = queue.aml_driver.is_animating and queue.aml_driver.is_animating()
+	if action_active or driver_active then return end
+
+	local target = queue.mags[queue.mag_index]
+	local mag_data = target and magazine_binder.get_data(target.mag:id())
+	local loaded = mag_data and mag_data.loaded and #mag_data.loaded or queue.aml_before
+	if queue.aml_phase == "unload" then
+		if loaded > 0 then
+			if loaded >= queue.aml_before then
+				finish_autoload(true, "aml_no_progress", true)
+				return
+			end
+			queue.aml_before = loaded
+		else
+			queue.mags[queue.mag_index].needs_replace = false
+			queue.aml_phase = nil
+			queue.aml_wait_until = time_global() + 100
+		end
+		queue.aml_active = false
+		start_next_aml_magazine(queue)
+		return
+	end
+
+	local added = math.max(0, loaded - queue.aml_before)
+	if added <= 0 then
+		finish_autoload(true, "aml_no_progress", true)
+		return
+	end
+	local actual_sections = {}
+	for i = queue.aml_before + 1, #mag_data.loaded do
+		actual_sections[#actual_sections + 1] = mag_data.loaded[i]
+	end
+	dbg("AML autoload result mag=%s selected=%s loaded=%s", target.mag:id(), tostring(target.ammo_section), table.concat(actual_sections, ","))
+	queue.total = queue.total + added
+	if not queue.mag_touched then
+		queue.touched = queue.touched + 1
+		queue.mag_touched = true
+	end
+
+	queue.aml_active = false
+	queue.aml_phase = nil
+	local target_section = (mag_data and mag_data.section) or target.mag:section()
+	local target_capacity = SYS_GetParam(2, target_section, "max_mag_size") or 0
+	if loaded >= target_capacity then
+		queue.mag_index = queue.mag_index + 1
+		queue.mag_touched = false
+	end
+	start_next_aml_magazine(queue)
+end
+
+local function start_scanned_autoload(mags, boxes, mode)
+	for i = 1, #mags do
+		if not get_mag_load_delay(mags[i].mag) then
+			notify(localized("Mags Autoload: cannot read load speed from Mags Reloaded", "Mags Autoload: nie mozna odczytac predkosci ladowania z Mags Reloaded"))
+			return
+		end
+	end
+
+	local aml_driver, fallback_reason = get_aml_driver()
+	local selected, skipped, replaced = apply_marked_ammo_mode(mags, mode, aml_driver ~= nil)
+	if #selected == 0 then
+		if skipped > 0 then
+			notify(string.format(localized("Mags Autoload: skipped %d incompatible magazines", "Mags Autoload: pominieto %d niezgodnych magazynkow"), skipped))
+		end
+		dbg("brak magazynkow zgodnych z trybem oznaczen")
+		return
+	end
+
+	local delay = get_mag_load_delay(selected[1].mag)
+	if not delay then
+		notify(localized("Mags Autoload: cannot read load speed from Mags Reloaded", "Mags Autoload: nie mozna odczytac predkosci ladowania z Mags Reloaded"))
+		return
+	end
+
+	if replaced and not aml_driver then
+		magazines.inventory_refresh(2)
+	end
+
+	begin_autoload(selected, boxes, delay, replaced and not aml_driver, skipped, aml_driver, fallback_reason)
+end
+
+local function start_balance()
+	if autoload_queue then
+		finish_autoload(true, "key_cancelled", true)
+		return
+	end
+	if pending_autoload_start then
+		pending_autoload_start = nil
+		report(localized("Mags Autoload: cancelled by key", "Mags Autoload: przerwano klawiszem"))
+		return
+	end
+	if magazines.action_in_progress and magazines.action_in_progress() then
+		notify(localized("Mags Autoload: wait for the current magazine action", "Mags Autoload: poczekaj na zakonczenie obecnej akcji"))
+		return
+	end
+
+	local candidates, boxes, stock = scan_balance_inventory()
+	local mix_ammo = cfg_enabled("balance_mix", DEFAULT_BALANCE_MIX)
+	local groups, selected = build_balance_groups(candidates, stock, mix_ammo)
+	if #selected == 0 then
+		notify(localized("Mags Autoload: no Loadout magazine groups to balance", "Mags Autoload: brak grup magazynkow Loadoutu do wyrownania"))
+		return
+	end
+
+	for i = 1, #selected do
+		if not get_mag_load_delay(selected[i].mag) then
+			notify(localized("Mags Autoload: cannot read load speed from Mags Reloaded", "Mags Autoload: nie mozna odczytac predkosci ladowania z Mags Reloaded"))
+			return
+		end
+	end
+
+	local unload_plan, expected_ammo = create_balance_unload_plan(groups, boxes)
+	local aml_driver, fallback_reason = get_aml_driver()
+	if aml_driver then
+		if not install_balance_round_hooks() then
+			notify(localized("Mags Autoload: AML single-round API is unavailable; balancing was not started", "Mags Autoload: brak API AML dla pojedynczych naboi; balansowanie nie zostalo uruchomione"))
+			return
+		end
+		if not (
+			magazines.begin_mag_load
+			and magazines.begin_round_loop
+			and magazines.get_mag_time
+			and magazines.action_start_magload
+			and magazines.do_interrupt
+			and magazines.unload_one_round
+		) then
+			notify(localized("Mags Autoload: AML host API is incomplete; balancing was not started", "Mags Autoload: API AML jest niekompletne; balansowanie nie zostalo uruchomione"))
+			return
+		end
+	elseif #unload_plan > 0 and not (
+		magazines.unload_one_round
+		and magazines.get_mag_time
+		and magazines.action_start_magload
+		and magazines.do_interrupt
+	) then
+		notify(localized("Mags Autoload: single-round unload API is unavailable; balancing was not started", "Mags Autoload: brak API rozladowania pojedynczego naboju; balansowanie nie zostalo uruchomione"))
+		return
+	end
+
+	autoload_queue = {
+		operation = "balance",
+		phase = #unload_plan > 0 and "unload" or "settle",
+		mags = selected,
+		groups = groups,
+		unload_plan = unload_plan,
+		unload_index = 1,
+		expected_ammo = expected_ammo,
+		aml_driver = aml_driver,
+		aml_active = false,
+		total = 0,
+		touched = 0,
+		unloaded_rounds = 0,
+		balance_action_started = false,
+		next_at = time_global(),
+	}
+	if aml_driver then
+		set_aml_autoload_speed(autoload_queue)
+	end
+
+	local message = localized("Mags Autoload: balancing Loadout magazines", "Mags Autoload: wyrownywanie magazynkow Loadoutu")
+	if fallback_reason then
+		message = string.format("%s; %s", message, aml_fallback_message(fallback_reason) or "")
+	end
+	notify(message)
+
+	dbg("balance plan: %s groups, %s magazines, %s partial unloads, mix=%s", #groups, #selected, #unload_plan, tostring(mix_ammo))
+end
+
+local function scan_non_loadout_magazines()
+	local mags, seen = {}, {}
+	db.actor:iterate_inventory(function(owner, item)
+		if magazine_binder.is_magazine(item) then
+			local id = item:id()
+			local mag_data = magazine_binder.get_data(id)
+			if not magazine_binder.is_carried_mag(id) and not seen[id] and mag_data and mag_data.loaded and #mag_data.loaded > 0 then
+				seen[id] = true
+				mags[#mags + 1] = {mag = item}
+			end
+		end
+	end)
+	table.sort(mags, function(a, b) return a.mag:id() < b.mag:id() end)
+	return mags
+end
+
+local function start_unload_all()
+	if autoload_queue then
+		finish_autoload(true, "key_cancelled", true)
+		return
+	end
+	if pending_autoload_start then
+		pending_autoload_start = nil
+		report(localized("Mags Autoload: cancelled by key", "Mags Autoload: przerwano klawiszem"))
+		return
+	end
+	if magazines.action_in_progress and magazines.action_in_progress() then
+		notify(localized("Mags Autoload: wait for the current magazine action", "Mags Autoload: poczekaj na zakonczenie obecnej akcji"))
+		return
+	end
+
+	local mags = scan_non_loadout_magazines()
+	if #mags == 0 then
+		notify(localized("Mags Autoload: no loaded magazines outside the Loadout", "Mags Autoload: brak zaladowanych magazynkow poza Loadoutem"))
+		return
+	end
+	local aml_driver = get_aml_driver()
+	if not aml_driver and not magazines.fast_unload_magazine then
+		notify(localized("Mags Autoload: magazine unload API is unavailable", "Mags Autoload: API rozladowywania magazynkow jest niedostepne"))
+		return
+	end
+
+	autoload_queue = {
+		operation = "unload_all",
+		phase = "unload",
+		mags = mags,
+		aml_driver = aml_driver,
+		aml_active = false,
+		mag_index = 1,
+		total = 0,
+		touched = 0,
+		unloaded_rounds = 0,
+	}
+	notify(localized("Mags Autoload: unloading magazines outside the Loadout", "Mags Autoload: rozladowywanie magazynkow spoza Loadoutu"))
+
+	if not aml_driver then
+		for i = 1, #mags do
+			local mag_data = magazine_binder.get_data(mags[i].mag:id())
+			local count = mag_data and mag_data.loaded and #mag_data.loaded or 0
+			if count > 0 then
+				magazines.fast_unload_magazine(mags[i].mag)
+				autoload_queue.unloaded_rounds = autoload_queue.unloaded_rounds + count
+				autoload_queue.touched = autoload_queue.touched + 1
+			end
+		end
+		autoload_queue.total = autoload_queue.unloaded_rounds
+		magazines.inventory_refresh(2)
+		finish_autoload(false)
+	end
+end
+
+local function process_autoload()
+	if pending_autoload_start and not autoload_queue then
+		if not inventory_open() then
+			pending_autoload_start = nil
+			report(localized("Mags Autoload: cancelled because inventory was closed", "Mags Autoload: anulowano po zamknieciu ekwipunku"))
+		elseif not (magazines.action_in_progress and magazines.action_in_progress()) then
+			local pending = pending_autoload_start
+			pending_autoload_start = nil
+			local mags, boxes = scan_loadout()
+			if #mags > 0 then
+				start_scanned_autoload(mags, boxes, pending.mode)
+			else
+				notify(localized("Mags Autoload: no magazines to load after the action", "Mags Autoload: po akcji brak magazynkow do zaladowania"))
+			end
+		end
+	end
+
+	local queue = autoload_queue
+	if not queue then return end
+
+	if not inventory_open() then
+		finish_autoload(true, "closed", true)
+		return
+	end
+	if queue.operation == "balance" then
+		process_balance_queue(queue)
+		return
+	elseif queue.operation == "unload_all" then
+		process_queue_unload(queue)
+		return
+	end
+	if queue.aml_driver then
+		process_aml_queue(queue)
+		return
+	end
+	if magazines.action_in_progress and magazines.action_in_progress() then
+		finish_autoload(true, "action")
+		return
+	end
+
+	local now = time_global()
+	if now < queue.next_at then return end
+
+	local target = queue.mags[queue.mag_index]
+	if not target then
+		finish_autoload(false)
+		return
+	end
+
+	if queue.refresh_boxes then
+		queue.boxes = collect_ammo_boxes()
+		queue.refresh_boxes = false
+	end
+
+	local mag = target.mag
+	local before = loaded_round_count(mag)
+	local loaded, mag_full = top_up_one_round(mag, queue.boxes, target.ammo_section)
+	local added = math.max(0, loaded_round_count(mag) - before)
+	if loaded and added > 0 then
+		queue.total = queue.total + added
+		if not queue.mag_touched then
+			queue.touched = queue.touched + 1
+			queue.mag_touched = true
+		end
+		utils_obj.play_sound("magazines\\ammo_load" .. math.random(1, 7))
+		magazines.inventory_refresh(2)
+		if mag_full then
+			queue.mag_index = queue.mag_index + 1
+			queue.mag_touched = false
+		end
+	else
+		queue.mag_index = queue.mag_index + 1
+		queue.mag_touched = false
+	end
+
+	target = queue.mags[queue.mag_index]
+	if not target then
+		finish_autoload(false)
+		return
+	end
+
+	set_autoload_spinner(queue, target.mag)
+	local delay = get_mag_load_delay(target.mag)
+	if not delay then
+		finish_autoload(true, "speed_error")
+		return
+	end
+	queue.next_at = now + delay * 1000
+end
+
+function autoload_all()
+	if autoload_queue then
+		finish_autoload(true, "key_cancelled", true)
+		return
+	end
+	if pending_autoload_start then
+		pending_autoload_start = nil
+		report(localized("Mags Autoload: cancelled by key", "Mags Autoload: przerwano klawiszem"))
+		return
+	end
+
+	local mags, boxes, loadout_count, incomplete_count, empty_count, marked_count = scan_loadout()
+	dbg("skan inventory: %d w Loadoucie, %d niepelnych, %d pustych, %d oznaczonych, %d do zaladowania", loadout_count, incomplete_count, empty_count, marked_count, #mags)
+	local mode = tonumber(get_cfg("marked_mode", DEFAULT_MARKED_MODE)) or DEFAULT_MARKED_MODE
+	if mode < 0 or mode > 2 then
+		mode = DEFAULT_MARKED_MODE
+	end
+
+	if magazines.action_in_progress and magazines.action_in_progress() then
+		pending_autoload_start = {mode = mode}
+		notify(localized("Mags Autoload: scan complete, waiting for the current action to finish", "Mags Autoload: skan gotowy, oczekiwanie na koniec akcji"))
+		dbg("skan gotowy; start odroczony do zakonczenia akcji Mags Reloaded")
+		return
+	end
+
+	if #mags == 0 then
+		local message = localized("Mags Autoload: no Loadout magazines found", "Mags Autoload: brak magazynkow w Loadoucie")
+		if loadout_count > 0 and incomplete_count == 0 and empty_count == 0 then
+			message = localized("Mags Autoload: all Loadout magazines are full", "Mags Autoload: magazynki Loadoutu sa pelne")
+		elseif incomplete_count > 0 or marked_count > 0 then
+			message = localized("Mags Autoload: no compatible ammo available", "Mags Autoload: brak odpowiedniej amunicji")
+		elseif empty_count > 0 then
+			message = localized("Mags Autoload: empty Loadout magazines are skipped", "Mags Autoload: puste magazynki Loadoutu sa pomijane")
+		end
+		notify(message)
+		return
+	end
+
+	start_scanned_autoload(mags, boxes, mode)
+end
+
+-- Wyzwalanie: 3 niezalezne sciezki (on_key_press, on_before_key_press oraz
+-- odpytywanie key_state w actor_on_update). Krotki debounce chroni przed duplikatami.
+local last_trigger
+local poll_states = {}
+local last_mode = nil
+
+local function bound_key()
+	return tonumber(get_cfg("key", DEFAULT_KEY)) or DEFAULT_KEY
+end
+
+local function balance_key()
+	return tonumber(get_cfg("balance_key", DEFAULT_BALANCE_KEY)) or DEFAULT_BALANCE_KEY
+end
+
+local function balance_uses_separate_key()
+	return tonumber(get_cfg("balance_key_mode", DEFAULT_BALANCE_KEY_MODE)) == 1
+end
+
+local function unload_all_key()
+	return tonumber(get_cfg("unload_all_key", DEFAULT_UNLOAD_ALL_KEY)) or DEFAULT_UNLOAD_ALL_KEY
+end
+
+local function trigger_operation(key)
+	if cfg_enabled("unload_all_enabled", DEFAULT_UNLOAD_ALL_ENABLED) and key == unload_all_key() then
+		return "unload_all"
+	end
+	if cfg_enabled("balance_enabled", DEFAULT_BALANCE_ENABLED) then
+		if balance_uses_separate_key() and key == balance_key() then
+			return "balance"
+		elseif not balance_uses_separate_key() and key == bound_key() then
+			return "balance"
+		end
+	end
+	if key == bound_key() then
+		return "autoload"
+	end
+	return nil
+end
+
+local function try_trigger(source, key)
+	local operation = trigger_operation(key)
+	local mode = actor_menu and actor_menu.get_last_mode and actor_menu.get_last_mode()
+	dbg("klawisz %s (akcja: %s, zrodlo: %s), tryb menu = %s", tostring(key), tostring(operation), source, tostring(mode))
+	if not operation or not inventory_open() then return end
+	local now = time_global()
+	if last_trigger and now - last_trigger < 150 then return end
+	last_trigger = now
+	if operation == "balance" then
+		start_balance()
+	elseif operation == "unload_all" then
+		start_unload_all()
+	else
+		autoload_all()
+	end
+end
+
+function on_key_press(key)
+	if trigger_operation(key) then try_trigger("on_key_press", key) end
+end
+
+function on_before_key_press(key, bind, dis, flags)
+	if trigger_operation(key) then try_trigger("on_before_key_press", key) end
+end
+
+function on_update()
+	process_autoload()
+
+	local mode = actor_menu and actor_menu.get_last_mode and actor_menu.get_last_mode()
+	if mode ~= last_mode then
+		last_mode = mode
+		dbg("zmiana trybu menu -> %s", tostring(mode))
+	end
+
+	local keys = {bound_key()}
+	if cfg_enabled("balance_enabled", DEFAULT_BALANCE_ENABLED) and balance_uses_separate_key() then
+		keys[#keys + 1] = balance_key()
+	end
+	if cfg_enabled("unload_all_enabled", DEFAULT_UNLOAD_ALL_ENABLED) then
+		keys[#keys + 1] = unload_all_key()
+	end
+	local seen = {}
+	for i = 1, #keys do
+		local key = keys[i]
+		if not seen[key] then
+			seen[key] = true
+			local down = (key_state(key) or 0) ~= 0
+			if down and not poll_states[key] then
+				try_trigger("key_state", key)
+			end
+			poll_states[key] = down
+		end
+	end
+end
+
+function on_game_start()
+	printf("[mags_autoload] on_game_start, callbacks registered")
+	install_spinner_cancel_hook()
+	RegisterScriptCallback("on_key_press", on_key_press)
+	RegisterScriptCallback("on_before_key_press", on_before_key_press)
+	RegisterScriptCallback("actor_on_update", on_update)
+end
