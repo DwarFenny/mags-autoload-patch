@@ -3,7 +3,7 @@
 <p align="center">
   <img src="assets/mags-autoload-mascot.png" alt="A tactical rooster holding magazines" width="420">
 </p>
-<p align="center"><em>Even the chicken knows: keep your magazines topped up.</em></p>
+<p align="center"><em>Even the turkey knows: keep your magazines topped up.</em></p>
 
 ## English
 
