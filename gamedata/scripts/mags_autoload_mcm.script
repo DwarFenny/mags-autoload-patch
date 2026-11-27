@@ -193,6 +193,7 @@ local function scan_loadout()
 		end
 	end
 
+	table.sort(mags, function(a, b) return a.mag:id() < b.mag:id() end)
 	return mags, boxes, loadout_count, incomplete_count, empty_count, marked_count
 end
 
@@ -376,13 +377,27 @@ local function build_balance_groups(candidates, stock, mix_ammo)
 			end
 			if #target.balance_sections > 0 then
 				local signature = table.concat(target.balance_sections, "\30")
-				target.balance_group_key = signature
 				local group = add_balance_group(groups, by_key, signature)
 				group.mags[#group.mags + 1] = target
 				for j = 1, #target.rounds do
 					local section = target.rounds[j]
 					group.loaded_by_section = group.loaded_by_section or {}
 					group.loaded_by_section[section] = (group.loaded_by_section[section] or 0) + 1
+				end
+				if target.mark then
+					local best_section, best_count = nil, -1
+					for j = 1, #target.compatible do
+						local section = target.compatible[j]
+						if section_matches_mark(section, target.mark) then
+							local count = stock[section] or 0
+							if count > best_count then
+								best_section, best_count = section, count
+							end
+						end
+					end
+					if best_section then
+						target.preferred_ammo = best_section
+					end
 				end
 			end
 		end
@@ -789,7 +804,8 @@ local function queue_uses_aml_field_loading(queue)
 end
 
 local function queue_can_continue_in_field(queue)
-	return queue_uses_aml_field_loading(queue)
+	return queue ~= nil
+		and queue_uses_aml_field_loading(queue)
 		and queue.continue_field
 		and cfg_enabled("continue_field", false)
 end
@@ -841,6 +857,7 @@ end
 local function finish_autoload(interrupted, reason, clear_spinner)
 	local queue = autoload_queue
 	if not queue then return end
+	autoload_queue = nil
 	if queue.aml_active then
 		local target = queue.aml_target_mag or queue.mags[queue.mag_index]
 		local mag_data = target and magazine_binder.get_data(target.mag:id())
@@ -877,7 +894,6 @@ local function finish_autoload(interrupted, reason, clear_spinner)
 	else
 		set_autoload_spinner(queue, nil)
 	end
-	autoload_queue = nil
 
 	if queue.total > 0 or (queue.unloaded_rounds or 0) > 0 then
 		magazines.timed_refresh()
@@ -1120,8 +1136,6 @@ local function process_queue_unload(queue)
 	else
 		if queue.operation == "unload_all" then
 			queue.touched = queue.touched + 1
-		else
-			queue.unloaded_mags = (queue.unloaded_mags or 0) + 1
 		end
 		queue.mag_index = queue.mag_index + 1
 	end
@@ -1328,6 +1342,9 @@ local function start_balance_aml_load(queue, target)
 	end
 	local box = find_ammo_box(queue.boxes, section)
 	if not box then return false end
+	if count_boxes_for_section(queue.boxes, section) < batch_count then
+		return false
+	end
 
 	queue.aml_before = loaded_round_count(target.mag)
 	queue.aml_target_count = queue.aml_before + batch_count
@@ -1504,7 +1521,9 @@ local function process_aml_queue(queue)
 
 	local added = math.max(0, loaded - queue.aml_before)
 	if added <= 0 then
-		finish_autoload(true, "aml_no_progress", true)
+		queue.mag_index = queue.mag_index + 1
+		queue.mag_touched = false
+		start_next_aml_magazine(queue)
 		return
 	end
 	local actual_sections = {}
@@ -1807,7 +1826,19 @@ local function process_autoload()
 		finish_autoload(true, "speed_error")
 		return
 	end
-	queue.next_at = now + delay * 1000
+	local wait = delay
+	local box_list = queue.boxes and queue.boxes[target.ammo_section]
+	if not box_list then
+		wait = 0
+	else
+		for i = 1, #box_list do
+			if (box_list[i]:ammo_get_count() or 0) > 0 then
+				wait = delay
+				break
+			end
+		end
+	end
+	queue.next_at = now + wait * 1000
 end
 
 function autoload_all()
@@ -1855,6 +1886,7 @@ end
 -- odpytywanie key_state w actor_on_update). Krotki debounce chroni przed duplikatami.
 local last_trigger
 local poll_states = {}
+local handled_keys = {}
 local last_mode = nil
 
 local function bound_key()
@@ -1895,6 +1927,8 @@ local function try_trigger(source, key)
 	local mode = actor_menu and actor_menu.get_last_mode and actor_menu.get_last_mode()
 	dbg("klawisz %s (akcja: %s, zrodlo: %s), tryb menu = %s", tostring(key), tostring(operation), source, tostring(mode))
 	if not operation or not inventory_open() then return end
+	if handled_keys[key] then return end
+	handled_keys[key] = true
 	local now = time_global()
 	if last_trigger and now - last_trigger < 150 then return end
 	last_trigger = now
@@ -1959,6 +1993,9 @@ local function install_field_queue_hooks()
 end
 
 function on_update()
+	if not autoload_queue and not pending_autoload_start and not inventory_open() then
+		return
+	end
 	install_field_queue_hooks()
 	process_autoload()
 
@@ -1981,7 +2018,10 @@ function on_update()
 		if not seen[key] then
 			seen[key] = true
 			local down = (key_state(key) or 0) ~= 0
-			if down and not poll_states[key] then
+			if not down and poll_states[key] then
+				handled_keys[key] = nil
+			end
+			if down and not poll_states[key] and not handled_keys[key] then
 				try_trigger("key_state", key)
 			end
 			poll_states[key] = down

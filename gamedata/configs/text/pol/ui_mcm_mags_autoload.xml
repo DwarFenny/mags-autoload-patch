@@ -49,7 +49,7 @@
 		<text>Mieszaj zgodn&#261; amunicj&#281; podczas r&#243;wnowa&#380;enia</text>
 	</string>
 	<string id="ui_mcm_mags_autoload_balance_mix_desc">
-		<text>Domy&#347;lnie wy&#322;&#261;czone: wyr&#243;wnuj osobno dok&#322;adne typy amunicji i respektuj oznaczenia magazynk&#243;w. Po w&#322;&#261;czeniu najpierw u&#380;ywaj dominuj&#261;cego typu amunicji w magazynku, a inne zgodne typy dopiero po jego wyczerpaniu; oznaczenia s&#261; ignorowane.</text>
+		<text>Domy&#347;lnie wy&#322;&#261;czone: wyr&#243;wnuj osobno dok&#322;adne typy amunicji i respektuj oznaczenia magazynk&#243;w. Po w&#322;&#261;czeniu najpierw u&#380;ywaj dominuj&#261;cego typu amunicji w magazynku, a inne zgodne typy dopiero po jego wyczerpaniu; oznaczenia s&#261; ignorowane. Balansowanie uwzględnia t&#281; ustawienie tej opcji: po w&#281;czeniu grupy kompatybilnych amunicji s&#261; u&#380;czone podczas balansowania.</text>
 	</string>
 	<string id="ui_mcm_mags_autoload_continue_field">
 		<text>Kontynuuj kolejk&#281; po zamkni&#281;ciu ekwipunku (AML)</text>

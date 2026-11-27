@@ -49,7 +49,7 @@
 		<text>Mix compatible ammo types while balancing</text>
 	</string>
 	<string id="ui_mcm_mags_autoload_balance_mix_desc">
-		<text>Off by default: balance exact ammo groups separately and respect magazine marks. On: prefer the magazine's dominant loaded ammo; use other compatible types only when it runs out, regardless of magazine marks.</text>
+		<text>Off by default: balance exact ammo groups separately and respect magazine marks. On: prefer the magazine's dominant loaded ammo; use other compatible types only when it runs out, regardless of magazine marks. Balancing also applies this option: when enabled, compatible ammo types are mixed during balancing as well.</text>
 	</string>
 	<string id="ui_mcm_mags_autoload_continue_field">
 		<text>Continue the queue after closing inventory (AML)</text>
